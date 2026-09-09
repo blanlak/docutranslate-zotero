@@ -1,42 +1,53 @@
-<div style="display:flex;flex-direction:column;gap:12px;padding:8px 4px;max-width:720px;font-size:13px;">
-  <div style="background:#fafafa;border:1px solid #e4e4e4;border-radius:6px;padding:12px 16px;margin-bottom:4px;">
-    <div style="font-weight:600;font-size:14px;margin-bottom:2px;">DocuTranslate 翻译设置</div>
-    <div style="color:#888;font-size:12px;margin-bottom:8px;">右键文献条目即可翻译；修改后自动保存。</div>
-    <div style="display:flex;align-items:center;margin:6px 0;">
-      <label style="width:130px;color:#555;flex:0 0 130px;">API Key</label>
-      <input id="dt-apiKey" type="password" style="flex:1;padding:4px 8px;border:1px solid #c0c0c0;border-radius:3px;min-width:280px;" autocomplete="off"/>
-    </div>
-    <div style="display:flex;align-items:center;margin:6px 0;">
-      <label style="width:130px;color:#555;flex:0 0 130px;">API 地址</label>
-      <input id="dt-baseUrl" style="flex:1;padding:4px 8px;border:1px solid #c0c0c0;border-radius:3px;min-width:280px;"/>
-    </div>
-    <div style="display:flex;align-items:center;margin:6px 0;">
-      <label style="width:130px;color:#555;flex:0 0 130px;">模型 ID</label>
-      <input id="dt-modelId" style="flex:1;padding:4px 8px;border:1px solid #c0c0c0;border-radius:3px;min-width:280px;"/>
-    </div>
-    <div style="display:flex;align-items:center;margin:6px 0;">
-      <label style="width:130px;color:#555;flex:0 0 130px;">翻译目标语言</label>
-      <input id="dt-toLang" style="flex:1;padding:4px 8px;border:1px solid #c0c0c0;border-radius:3px;min-width:280px;"/>
-    </div>
-    <div style="display:flex;align-items:center;margin:6px 0;">
-      <label style="width:130px;color:#555;flex:0 0 130px;">思考模式</label>
-      <input id="dt-thinking" style="flex:1;padding:4px 8px;border:1px solid #c0c0c0;border-radius:3px;min-width:280px;"/>
-    </div>
+<div style="padding: 12px 16px; max-width: 640px; font-size: 13px; color: #1a1a1a;">
+  <h2 style="font-size: 16px; font-weight: 600; margin: 0 0 4px;">翻译服务</h2>
+  <p style="color: #777; font-size: 12px; margin: 0 0 16px;">
+    调用本机 DocuTranslate 服务所需的配置。右键文献条目即可翻译。
+  </p>
+
+  <div style="margin-bottom: 14px;">
+    <div style="margin-bottom: 4px; color: #444;">API Key</div>
+    <input id="dt-apiKey" type="password" autocomplete="off"
+      style="width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid #c0c0c0; border-radius: 4px; font: inherit;"/>
   </div>
-  <div style="background:#fafafa;border:1px solid #e4e4e4;border-radius:6px;padding:12px 16px;margin-bottom:4px;">
-    <div style="font-weight:600;font-size:14px;margin-bottom:2px;">PDF 解析（MinerU）</div>
-    <div style="color:#888;font-size:12px;margin-bottom:8px;">解析 PDF 时的识别参数。</div>
-    <div style="display:flex;align-items:center;margin:6px 0;">
-      <label style="width:130px;color:#555;flex:0 0 130px;">MinerU Token</label>
-      <input id="dt-mineruToken" type="password" style="flex:1;padding:4px 8px;border:1px solid #c0c0c0;border-radius:3px;min-width:280px;" autocomplete="off"/>
-    </div>
-    <div style="display:flex;align-items:center;margin:6px 0;">
-      <label style="width:130px;color:#555;flex:0 0 130px;">分块大小</label>
-      <input id="dt-chunkSize" type="number" style="padding:4px 8px;border:1px solid #c0c0c0;border-radius:3px;max-width:140px;"/>
-    </div>
-    <div style="display:flex;align-items:center;margin:6px 0;">
-      <label style="width:130px;color:#555;flex:0 0 130px;">并发数</label>
-      <input id="dt-concurrent" type="number" style="padding:4px 8px;border:1px solid #c0c0c0;border-radius:3px;max-width:140px;"/>
-    </div>
+  <div style="margin-bottom: 14px;">
+    <div style="margin-bottom: 4px; color: #444;">API 地址</div>
+    <input id="dt-baseUrl"
+      style="width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid #c0c0c0; border-radius: 4px; font: inherit;"/>
+  </div>
+  <div style="margin-bottom: 14px;">
+    <div style="margin-bottom: 4px; color: #444;">模型 ID</div>
+    <input id="dt-modelId"
+      style="width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid #c0c0c0; border-radius: 4px; font: inherit;"/>
+  </div>
+  <div style="margin-bottom: 14px;">
+    <div style="margin-bottom: 4px; color: #444;">翻译目标语言</div>
+    <input id="dt-toLang"
+      style="width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid #c0c0c0; border-radius: 4px; font: inherit;"/>
+  </div>
+  <div style="margin-bottom: 14px;">
+    <div style="margin-bottom: 4px; color: #444;">思考模式</div>
+    <input id="dt-thinking"
+      style="width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid #c0c0c0; border-radius: 4px; font: inherit;"/>
+  </div>
+
+  <h2 style="font-size: 16px; font-weight: 600; margin: 20px 0 4px;">PDF 解析（MinerU）</h2>
+  <p style="color: #777; font-size: 12px; margin: 0 0 16px;">
+    解析 PDF 时的 MinerU 服务凭据与并发参数。
+  </p>
+
+  <div style="margin-bottom: 14px;">
+    <div style="margin-bottom: 4px; color: #444;">MinerU Token</div>
+    <input id="dt-mineruToken" type="password" autocomplete="off"
+      style="width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid #c0c0c0; border-radius: 4px; font: inherit;"/>
+  </div>
+  <div style="margin-bottom: 14px;">
+    <div style="margin-bottom: 4px; color: #444;">分块大小</div>
+    <input id="dt-chunkSize" type="number"
+      style="width: 200px; box-sizing: border-box; padding: 6px 10px; border: 1px solid #c0c0c0; border-radius: 4px; font: inherit;"/>
+  </div>
+  <div style="margin-bottom: 14px;">
+    <div style="margin-bottom: 4px; color: #444;">并发数</div>
+    <input id="dt-concurrent" type="number"
+      style="width: 200px; box-sizing: border-box; padding: 6px 10px; border: 1px solid #c0c0c0; border-radius: 4px; font: inherit;"/>
   </div>
 </div>
