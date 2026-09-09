@@ -123,6 +123,7 @@ var Translator = {
         if (this._pw) {
             try { this._pw.close(); } catch (e) {}
         }
+        // 翻译过程中弹窗持续显示，完成/失败后再自动关 30 秒
         const pw = new Zotero.ProgressWindow({ closeOnClick: true });
         this._pw = pw;
         pw.changeHeadline("DocuTranslate 翻译");
@@ -229,14 +230,14 @@ var Translator = {
                     log("已挂载: " + destPdf);
                     progress.setProgress(100);
                     progress.setText("翻译完成：" + safeName);
-                    if (Translator._pw) Translator._pw.startCloseTimer(6000);
+                    if (Translator._pw) Translator._pw.startCloseTimer(30000);
                     settle(true);
                 } catch (e) {
                     log("挂载失败: " + (e.stack || e));
                     try {
                         progress.setError();
                         progress.setText("失败：" + (e.message || e));
-                        if (Translator._pw) Translator._pw.startCloseTimer(10000);
+                        if (Translator._pw) Translator._pw.startCloseTimer(30000);
                     } catch (e2) {}
                     settle(false);
                 }
