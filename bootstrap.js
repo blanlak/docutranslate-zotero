@@ -64,6 +64,39 @@ async function removeDirRecursive(p) {
     try { await IOUtils.remove(p, { recursive: true }); } catch (e) {}
 }
 
+// ---- 同步文件工具（事件驱动编排用，绝不依赖 promise 定时器） ----
+
+function makeNsIFile(p) {
+    const f = Components.classes["@mozilla.org/file/local;1"]
+        .createInstance(Components.interfaces.nsIFile);
+    f.initWithPath(p);
+    return f;
+}
+
+function fileExistsSync(p) {
+    try { return makeNsIFile(p).exists(); } catch (e) { return false; }
+}
+
+// 同步读取整个文件并解码为 UTF-8 字符串（不存在/为空返回 ""）
+function syncReadUtf8(p) {
+    try {
+        const f = makeNsIFile(p);
+        if (!f.exists()) return "";
+        const is = Components.classes["@mozilla.org/network/file-input-stream;1"]
+            .createInstance(Components.interfaces.nsIFileInputStream);
+        is.init(f, -1, 0, 0);
+        const avail = is.available();
+        if (!avail) { is.close(); return ""; }
+        const bis = Components.classes["@mozilla.org/binaryinputstream;1"]
+            .createInstance(Components.interfaces.nsIBinaryInputStream);
+        bis.setInputStream(is);
+        const bytes = bis.readByteArray(avail);
+        bis.close();
+        is.close();
+        return new TextDecoder("utf-8").decode(Uint8Array.from(bytes));
+    } catch (e) { return ""; }
+}
+
 var Translator = {
 
     async translateSelected(items) {
@@ -128,9 +161,8 @@ var Translator = {
             await writeUTF8(workDir + "\\config.json", JSON.stringify(cfg));
             log("配置: model=" + cfg.model_id + " base=" + cfg.base_url);
 
-            // 3. 单次助手调用完成全部流程：检查/拉起服务 -> 上传翻译 -> 下载译文
-            //    -> Edge 打印 -> 复制译文 PDF 到原 PDF 同目录
-            //    （插件只发起一次进程启动，之后的进度全部来自 progress.txt）
+            // 3. 事件驱动编排：启动 helper（进程退出时 observer 同步触发挂载），
+            //    nsITimer 每秒同步读进度文件刷新弹窗——全程无 await 轮询
             progress.setText("检查本地翻译服务…");
             log("流程开始: " + title + " | PDF: " + pdfPath);
             const safeName = "已翻译-" + title.replace(/[\\/:*?"<>|]/g, "_") + ".pdf";
@@ -138,31 +170,13 @@ var Translator = {
             const pdfDir = pdfPath.substring(0, pdfPath.lastIndexOf("\\"));
             const destPdf = pdfDir + "\\" + safeName;
             log("译文目标: " + destPdf);
-            const translated = await this.runHelper("run", pdfPath, workDir, progress, destPdf);
-            if (!translated) throw new Error("翻译流程未完成");
-
-            // 4. 确认译文 PDF 已在原 PDF 同目录生成
-            if (!(await fileExists(destPdf))) {
-                throw new Error("未在原 PDF 目录找到译文: " + destPdf);
+            const ok = await this.runTranslateAndMount(
+                pdfPath, workDir, destPdf, safeName, title, item.id, progress);
+            if (!ok) {
+                // 失败详情已由 runTranslateAndMount 展示在弹窗
+                log("翻译流程未完成，详情见弹窗");
+                return;
             }
-
-            // 5. 以链接方式挂到条目（官方 linkFromFile：自动处理路径与父级关联，
-            //    文件保留在原 PDF 目录不复制）
-            progress.setText("关联到 Zotero 条目…");
-            const linkFile = Components.classes["@mozilla.org/file/local;1"]
-                .createInstance(Components.interfaces.nsIFile);
-            linkFile.initWithPath(destPdf);
-            await Zotero.Attachments.linkFromFile({
-                file: linkFile,
-                parentItemID: item.id,
-                title: "已翻译-" + title
-            });
-            log("已关联: " + destPdf);
-
-            progress.setIcon("chrome://zotero/skin/tick.png");
-            progress.setText("翻译完成：" + safeName);
-            pw.startCloseTimer(6000);
-            log("完成: " + safeName);
         } catch (e) {
             progress.setError();
             progress.setText("失败：" + (e.message || e));
@@ -178,72 +192,118 @@ var Translator = {
         }
     },
 
-    // 单次助手调用（run 模式）：插件只发起这一次进程启动，随后轮询 progress.txt
-    // 直到完成标记(>=100)或失败标记(-1，抛出具体错误)
-    async runHelper(mode, pdfPath, workDir, progress, destPdf) {
-        const progressFile = workDir + "\\progress.txt";
-        log("runHelper " + mode + " 启动, workDir=" + workDir);
-        // 清除旧的进度文件
-        try { await IOUtils.remove(progressFile); } catch (e) { log("remove progress 失败: " + e); }
-        try {
-            const args = [CONFIG.helperScript, "run", pdfPath, workDir];
-            if (destPdf) args.push(destPdf);
-            await this.runAsync(CONFIG.pythonwExe, args);
-        } catch (e) {
-            log("runAsync 抛异常: " + (e.stack || e));
-            throw e;
-        }
+    // ============ 事件驱动编排（v1.4.3 核心） ============
+    // 启动一次 helper（pythonw，无窗口）；helper 进程退出时由 nsIProcess
+    // observer（同步 XPCOM 事件，不依赖 promise 定时器）触发挂载；
+    // 期间 nsITimer 每秒同步读 progress.txt 刷新弹窗。
+    // 返回 Promise，resolve(true) = helper 完成且译文已挂载；resolve(false)=失败。
+    runTranslateAndMount(pdfPath, workDir, destPdf, safeName, title, parentItemID, progress) {
+        return new Promise((resolveOuter) => {
+            const progressFile = workDir + "\\progress.txt";
+            let timer = null;
+            let settled = false;
 
-        const decoder = new TextDecoder("utf-8");
-        let lastRaw = "", lastChange = Date.now();
-        const maxMs = 20 * 60 * 1000;
-        const start = Date.now();
-        while (Date.now() - start < maxMs) {
-            await delay(1200);
-            let raw = "";
-            try {
-                const buf = await IOUtils.read(progressFile);
-                raw = decoder.decode(buf).trim();
-            } catch (e) { continue; }
-            if (raw && raw !== lastRaw) {
-                lastRaw = raw;
-                lastChange = Date.now();
+            const settle = (ok) => {
+                if (settled) return;
+                settled = true;
+                try { timer.cancel(); } catch (e) {}
+                resolveOuter(ok);
+            };
+
+            const mount = async () => {
+                try {
+                    // 读取最终进度，判断是否失败
+                    const raw = syncReadUtf8(progressFile).trim();
+                    if (raw.startsWith("-1")) {
+                        throw new Error(raw.slice(3) || "翻译失败");
+                    }
+                    if (!fileExistsSync(destPdf)) {
+                        throw new Error("未在原 PDF 目录找到译文: " + destPdf);
+                    }
+                    progress.setText("关联到 Zotero 条目…");
+                    await Zotero.Attachments.linkFromFile({
+                        file: makeNsIFile(destPdf),
+                        parentItemID: parentItemID,
+                        title: title
+                    });
+                    log("已挂载: " + destPdf);
+                    progress.setIcon("chrome://zotero/skin/tick.png");
+                    progress.setText("翻译完成：" + safeName);
+                    if (Translator._pw) Translator._pw.startCloseTimer(6000);
+                    settle(true);
+                } catch (e) {
+                    log("挂载失败: " + (e.stack || e));
+                    try {
+                        progress.setError();
+                        progress.setText("失败：" + (e.message || e));
+                        if (Translator._pw) Translator._pw.startCloseTimer(10000);
+                    } catch (e2) {}
+                    settle(false);
+                }
+            };
+
+            // 进度刷新 timer：每秒同步读一次 progress.txt
+            const tick = () => {
+                const raw = syncReadUtf8(progressFile).trim();
+                if (!raw) return;
                 const sp = raw.indexOf(" ");
+                if (sp <= 0) return;
                 const pct = parseInt(raw.slice(0, sp), 10);
-                const msg = raw.slice(sp + 1);
-                if (pct === -1) throw new Error(msg);  // 明确失败
-                progress.setProgress(Math.max(1, Math.min(99, pct)));
-                progress.setText(msg);
-                if (pct >= 100) return true;
-            }
-            // 5 分钟无进展视为卡死
-            if (Date.now() - lastChange > 5 * 60 * 1000) {
-                throw new Error("翻译长时间无进展，已中止");
-            }
-        }
-        throw new Error("处理超时");
-    },
+                if (isNaN(pct)) return;
+                try {
+                    progress.setProgress(Math.max(1, Math.min(99, pct)));
+                    progress.setText(raw.slice(sp + 1));
+                } catch (e) {}
+            };
 
-    async runAsync(exePath, args) {
-        log("runAsync: " + exePath + " " + args.join(" "));
-        try {
-            if (!(await fileExists(exePath))) {
-                throw new Error("文件不存在: " + exePath);
+            // helper 进程退出（成功或失败都会退出）→ 触发挂载
+            const observer = {
+                observe(subject, topic, data) {
+                    if (topic === "process-finished" || topic === "process-failed") {
+                        log("helper 进程退出: " + topic);
+                        mount();
+                    }
+                }
+            };
+
+            // 启动一次进程（唯一一次 nsIProcess 调用）
+            try {
+                if (!fileExistsSync(CONFIG.pythonwExe)) {
+                    throw new Error("pythonw 不存在: " + CONFIG.pythonwExe);
+                }
+                const file = makeNsIFile(CONFIG.pythonwExe);
+                const proc = Components.classes["@mozilla.org/process/util;1"]
+                    .createInstance(Components.interfaces.nsIProcess);
+                proc.init(file);
+                const args = [CONFIG.helperScript, "run", pdfPath, workDir, destPdf];
+                log("启动 helper: " + args.join(" "));
+                proc.runwAsync(args, args.length, observer);
+            } catch (e) {
+                log("启动 helper 异常: " + (e.stack || e));
+                try {
+                    progress.setError();
+                    progress.setText("失败：" + (e.message || e));
+                } catch (e2) {}
+                settle(false);
+                return;
             }
-            // 直接构造 nsIFile（Zotero 10 的 pathToFile 返回值没有 exists 方法）
-            const file = Components.classes["@mozilla.org/file/local;1"]
-                .createInstance(Components.interfaces.nsIFile);
-            file.initWithPath(exePath);
-            const proc = Components.classes["@mozilla.org/process/util;1"]
-                .createInstance(Components.interfaces.nsIProcess);
-            proc.init(file);
-            proc.runwAsync(args, args.length);
-            log("runAsync 已发出");
-            return proc;
-        } catch (e) {
-            log("runAsync 异常: " + (e.stack || e));
-            throw e;
-        }
+
+            timer = Components.classes["@mozilla.org/timer;1"]
+                .createInstance(Components.interfaces.nsITimer);
+            timer.initWithCallback({ notify: tick }, 1000,
+                Components.interfaces.nsITimer.TYPE_REPEATING_SLACK);
+
+            // 兜底：25 分钟无进程退出则失败
+            const guard = Components.classes["@mozilla.org/timer;1"]
+                .createInstance(Components.interfaces.nsITimer);
+            guard.initWithCallback({
+                notify() {
+                    log("翻译 25 分钟未完成，中止");
+                    try { progress.setError(); progress.setText("失败：处理超时"); } catch (e) {}
+                    settle(false);
+                }
+            }, 25 * 60 * 1000, Components.interfaces.nsITimer.TYPE_ONE_SHOT);
+        });
     },
 
     notify(msg, isError) {
