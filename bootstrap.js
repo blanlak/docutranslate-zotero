@@ -227,7 +227,7 @@ var Translator = {
                     await Zotero.Attachments.linkFromFile({
                         file: makeNsIFile(destPdf),
                         parentItemID: parentItemID,
-                        title: title
+                        title: "已翻译-" + title
                     });
                     log("已挂载: " + destPdf);
                     progress.setProgress(100);
