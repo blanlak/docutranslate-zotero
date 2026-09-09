@@ -123,8 +123,8 @@ var Translator = {
         if (this._pw) {
             try { this._pw.close(); } catch (e) {}
         }
-        // 翻译过程中弹窗持续显示，完成/失败后再自动关 30 秒
-        const pw = new Zotero.ProgressWindow({ closeOnClick: true });
+        // 翻译过程中弹窗持续显示；点窗口身体不会关闭（只有右上角 × 或自动超时）
+        const pw = new Zotero.ProgressWindow({ closeOnClick: false });
         this._pw = pw;
         pw.changeHeadline("DocuTranslate 翻译");
         const progress = new pw.ItemProgress(
@@ -132,6 +132,8 @@ var Translator = {
             "准备翻译：" + title
         );
         pw.show();
+        // 等窗口加载后注入右上角 × 关闭按钮
+        this.injectCloseX();
 
         let workDir = null;
         try {
@@ -305,6 +307,36 @@ var Translator = {
                 }
             }, 25 * 60 * 1000, Components.interfaces.nsITimer.TYPE_ONE_SHOT);
         });
+    },
+
+    // 给所有 DocuTranslate 进度弹窗注入右上角 ×（Zotero 弹窗默认无此按钮，
+    // closeOnClick=false 后必须提供手动关闭方式）
+    injectCloseX() {
+        try {
+            const wm = Components.classes["@mozilla.org/appshell/window-mediator;1"]
+                .getService(Components.interfaces.nsIWindowMediator);
+            const wins = wm.getEnumerator(null);
+            while (wins.hasMoreElements()) {
+                const w = wins.getNext();
+                const doc = w && w.document;
+                if (!doc) continue;
+                if ((doc.documentURI || "").indexOf("progressWindow.xhtml") === -1) continue;
+                if (doc.getElementById("dt-close-x")) continue;
+                const x = doc.createElementNS("http://www.w3.org/1999/xhtml", "button");
+                x.id = "dt-close-x";
+                x.textContent = "×";
+                x.title = "关闭";
+                x.style.cssText = "position:fixed;top:0;right:4px;z-index:2147483647;" +
+                    "border:none;background:transparent;color:#c00;font-size:18px;" +
+                    "font-weight:bold;cursor:pointer;line-height:1;padding:3px 7px;";
+                x.addEventListener("click", function () {
+                    try { w.close(); } catch (e) {}
+                });
+                doc.body.appendChild(x);
+            }
+        } catch (e) {
+            log("注入 × 失败: " + e);
+        }
     },
 
     notify(msg, isError) {
