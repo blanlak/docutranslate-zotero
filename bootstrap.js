@@ -227,7 +227,7 @@ var Translator = {
                         title: title
                     });
                     log("已挂载: " + destPdf);
-                    progress.setIcon("chrome://zotero/skin/tick.png");
+                    progress.setProgress(100);
                     progress.setText("翻译完成：" + safeName);
                     if (Translator._pw) Translator._pw.startCloseTimer(6000);
                     settle(true);
