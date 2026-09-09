@@ -132,8 +132,8 @@ var Translator = {
             "准备翻译：" + title
         );
         pw.show();
-        // 等窗口加载后注入右上角 × 关闭按钮
-        this.injectCloseX();
+        // 等窗口加载完成后再注入 × + 移动到主窗口右下角内偏移
+        this.injectCloseXAndPosition();
 
         let workDir = null;
         try {
@@ -309,33 +309,56 @@ var Translator = {
         });
     },
 
-    // 给所有 DocuTranslate 进度弹窗注入右上角 ×（Zotero 弹窗默认无此按钮，
-    // closeOnClick=false 后必须提供手动关闭方式）
-    injectCloseX() {
-        try {
-            const wm = Components.classes["@mozilla.org/appshell/window-mediator;1"]
-                .getService(Components.interfaces.nsIWindowMediator);
-            const wins = wm.getEnumerator(null);
-            while (wins.hasMoreElements()) {
-                const w = wins.getNext();
-                const doc = w && w.document;
-                if (!doc) continue;
-                if ((doc.documentURI || "").indexOf("progressWindow.xhtml") === -1) continue;
-                if (doc.getElementById("dt-close-x")) continue;
-                const x = doc.createElementNS("http://www.w3.org/1999/xhtml", "button");
-                x.id = "dt-close-x";
-                x.textContent = "×";
-                x.title = "关闭";
-                x.style.cssText = "position:fixed;top:0;right:4px;z-index:2147483647;" +
-                    "border:none;background:transparent;color:#c00;font-size:18px;" +
-                    "font-weight:bold;cursor:pointer;line-height:1;padding:3px 7px;";
-                x.addEventListener("click", function () {
-                    try { w.close(); } catch (e) {}
-                });
-                doc.body.appendChild(x);
+    // 给所有 DocuTranslate 进度弹窗注入右上角 ×（Zotero 弹窗默认无此按钮），
+    // 并移动到主窗口右下角内偏移
+    injectCloseXAndPosition() {
+        const self = this;
+        const timer = Components.classes["@mozilla.org/timer;1"]
+            .createInstance(Components.interfaces.nsITimer);
+        timer.initWithCallback({
+            notify() {
+                try { self._injectAndPositionPopup(); }
+                catch (e) { log("注入/定位失败: " + e); }
             }
-        } catch (e) {
-            log("注入 × 失败: " + e);
+        }, 250, Components.interfaces.nsITimer.TYPE_ONE_SHOT);
+    },
+
+    _injectAndPositionPopup() {
+        const wm = Components.classes["@mozilla.org/appshell/window-mediator;1"]
+            .getService(Components.interfaces.nsIWindowMediator);
+        const wins = wm.getEnumerator(null);
+        const main = Zotero.getMainWindow();
+        while (wins.hasMoreElements()) {
+            const w = wins.getNext();
+            const doc = w && w.document;
+            if (!doc) continue;
+            if ((doc.documentURI || "").indexOf("progressWindow.xhtml") === -1) continue;
+            // 注入 ×
+            if (!doc.getElementById("dt-close-x")) {
+                try {
+                    const x = doc.createElementNS("http://www.w3.org/1999/xhtml", "button");
+                    x.id = "dt-close-x";
+                    x.textContent = "×";
+                    x.title = "关闭";
+                    x.style.cssText = "position:absolute;top:0;right:4px;z-index:2147483647;" +
+                        "border:none;background:transparent;color:#c00;font-size:18px;" +
+                        "font-weight:bold;cursor:pointer;line-height:1;padding:3px 7px;font-family:Arial,sans-serif;";
+                    x.addEventListener("click", function () {
+                        try { w.close(); } catch (e) {}
+                    });
+                    doc.body.appendChild(x);
+                } catch (e) { log("注入 × 元素失败: " + e); }
+            }
+            // 移动到主窗口右下角内偏移 20px
+            if (main) {
+                try {
+                    const wW = w.outerWidth || 360;
+                    const wH = w.outerHeight || 120;
+                    const x = main.screenX + main.outerWidth - wW - 20;
+                    const y = main.screenY + main.outerHeight - wH - 20;
+                    w.moveTo(x, y);
+                } catch (e) { log("移动弹窗位置失败: " + e); }
+            }
         }
     },
 
