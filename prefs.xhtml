@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<vbox xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+      xmlns:html="http://www.w3.org/1999/xhtml">
+  <groupbox>
+    <label><html:h2>DocuTranslate 翻译设置</html:h2></label>
+    <label value="右键文献条目即可翻译；修改后自动保存，无需重启 Zotero。"/>
+
+    <hbox align="center" style="margin-top: 8px;">
+      <label value="API Key" style="width: 130px"/>
+      <html:input id="dt-apiKey" type="text" flex="1" style="min-width: 30em"/>
+    </hbox>
+    <hbox align="center" style="margin-top: 6px;">
+      <label value="API 地址" style="width: 130px"/>
+      <html:input id="dt-baseUrl" type="text" flex="1" style="min-width: 30em"/>
+    </hbox>
+    <hbox align="center" style="margin-top: 6px;">
+      <label value="模型 ID" style="width: 130px"/>
+      <html:input id="dt-modelId" type="text" style="min-width: 20em"/>
+    </hbox>
+    <hbox align="center" style="margin-top: 6px;">
+      <label value="翻译目标语言" style="width: 130px"/>
+      <html:input id="dt-toLang" style="min-width: 12em"/>
+    </hbox>
+    <hbox align="center" style="margin-top: 6px;">
+      <label value="思考模式" style="width: 130px"/>
+      <html:input id="dt-thinking" style="min-width: 12em"/>
+    </hbox>
+  </groupbox>
+
+  <groupbox>
+    <label><html:h2>PDF 解析（MinerU）</html:h2></label>
+    <hbox align="center">
+      <label value="MinerU Token" style="width: 130px"/>
+      <html:input id="dt-mineruToken" type="text" flex="1" style="min-width: 30em"/>
+    </hbox>
+    <hbox align="center" style="margin-top: 6px;">
+      <label value="分块大小" style="width: 130px"/>
+      <html:input id="dt-chunkSize" style="min-width: 8em"/>
+    </hbox>
+    <hbox align="center" style="margin-top: 6px;">
+      <label value="并发数" style="width: 130px"/>
+      <html:input id="dt-concurrent" style="min-width: 8em"/>
+    </hbox>
+  </groupbox>
+</vbox>

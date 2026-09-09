@@ -1,0 +1,12 @@
+{
+  "addons": {
+    "docutranslate-cn@blanklan": {
+      "updates": [
+        {
+          "version": "1.4.2",
+          "update_link": "https://github.com/blanlak/docutranslate-zotero/releases/latest/download/DocuTranslate.xpi"
+        }
+      ]
+    }
+  }
+}
