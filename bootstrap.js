@@ -51,6 +51,28 @@ function delay(ms) {
     });
 }
 
+// 拦截主窗口的 openDialog，捕获 ProgressWindow 子窗口引用
+function hookOpenDialog() {
+    try {
+        const main = Zotero.getMainWindow();
+        if (!main) return;
+        if (main._dtHookedOpenDialog) return;
+        main._dtHookedOpenDialog = true;
+        const orig = main.openDialog;
+        main.openDialog = function () {
+            const w = orig.apply(this, Array.prototype.slice.call(arguments));
+            const url = arguments[0];
+            if (w && typeof url === "string" &&
+                url.indexOf("progressWindow.xhtml") >= 0) {
+                Translator._lastProgressWindow = w;
+            }
+            return w;
+        };
+    } catch (e) {
+        log("hookOpenDialog 失败: " + e);
+    }
+}
+
 // Zotero 10 兼容：文件操作全部走 IOUtils
 async function fileExists(p) {
     try { await IOUtils.stat(p); return true; } catch (e) { return false; }
@@ -324,41 +346,36 @@ var Translator = {
     },
 
     _injectAndPositionPopup() {
-        const wm = Components.classes["@mozilla.org/appshell/window-mediator;1"]
-            .getService(Components.interfaces.nsIWindowMediator);
-        const wins = wm.getEnumerator(null);
+        const w = Translator._lastProgressWindow;
+        if (!w || w.closed) {
+            log("无法找到 ProgressWindow 子窗口（openDialog 钩子未触发？）");
+            return;
+        }
+        const doc = w.document;
         const main = Zotero.getMainWindow();
-        while (wins.hasMoreElements()) {
-            const w = wins.getNext();
-            const doc = w && w.document;
-            if (!doc) continue;
-            if ((doc.documentURI || "").indexOf("progressWindow.xhtml") === -1) continue;
-            // 注入 ×
-            if (!doc.getElementById("dt-close-x")) {
-                try {
-                    const x = doc.createElementNS("http://www.w3.org/1999/xhtml", "button");
-                    x.id = "dt-close-x";
-                    x.textContent = "×";
-                    x.title = "关闭";
-                    x.style.cssText = "position:absolute;top:0;right:4px;z-index:2147483647;" +
-                        "border:none;background:transparent;color:#c00;font-size:18px;" +
-                        "font-weight:bold;cursor:pointer;line-height:1;padding:3px 7px;font-family:Arial,sans-serif;";
-                    x.addEventListener("click", function () {
-                        try { w.close(); } catch (e) {}
-                    });
-                    doc.body.appendChild(x);
-                } catch (e) { log("注入 × 元素失败: " + e); }
-            }
-            // 移动到主窗口右下角内偏移 20px
-            if (main) {
-                try {
-                    const wW = w.outerWidth || 360;
-                    const wH = w.outerHeight || 120;
-                    const x = main.screenX + main.outerWidth - wW - 20;
-                    const y = main.screenY + main.outerHeight - wH - 20;
-                    w.moveTo(x, y);
-                } catch (e) { log("移动弹窗位置失败: " + e); }
-            }
+        if (doc && !doc.getElementById("dt-close-x")) {
+            try {
+                const x = doc.createElementNS("http://www.w3.org/1999/xhtml", "button");
+                x.id = "dt-close-x";
+                x.textContent = "×";
+                x.title = "关闭";
+                x.style.cssText = "position:absolute;top:0;right:4px;z-index:2147483647;" +
+                    "border:none;background:transparent;color:#c00;font-size:18px;" +
+                    "font-weight:bold;cursor:pointer;line-height:1;padding:3px 7px;font-family:Arial,sans-serif;";
+                x.addEventListener("click", function () {
+                    try { w.close(); } catch (e) {}
+                });
+                doc.body.appendChild(x);
+            } catch (e) { log("注入 × 元素失败: " + e); }
+        }
+        if (main) {
+            try {
+                const wW = w.outerWidth || 360;
+                const wH = w.outerHeight || 120;
+                const x = main.screenX + main.outerWidth - wW - 20;
+                const y = main.screenY + main.outerHeight - wH - 20;
+                w.moveTo(x, y);
+            } catch (e) { log("移动弹窗位置失败: " + e); }
         }
     },
 
@@ -399,6 +416,9 @@ async function startup({ id, version, rootURI }, reason) {
         await Zotero.initializationPromise;
         Zotero.DocuTranslate = Translator;
         addMenu(Zotero.getMainWindow());
+        // 拦截主窗口 openDialog，捕获 ProgressWindow 子窗口引用（闭包内私有，
+        // 外部无法直接拿——必须钩主窗口的 openDialog 才能拿到 chrome window）
+        hookOpenDialog();
         // 注册设置面板（Zotero 设置左侧栏 -> DocuTranslate 翻译）
         Zotero.PreferencePanes.register({
             pluginID: "docutranslate-cn@blanklan",
