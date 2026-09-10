@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "DocuTranslate 中文翻译",
-  "version": "1.4.14",
+  "version": "1.4.15",
   "description": "右键 PDF 一键 DocuTranslate 中文翻译，译文 PDF 自动回填 Zotero 条目",
   "homepage_url": "https://github.com/blanlak/docutranslate-zotero",
   "author": "blanklan",
