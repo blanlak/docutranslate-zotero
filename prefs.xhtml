@@ -1,47 +1,56 @@
-<div xmlns="http://www.w3.org/1999/xhtml" xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
-  <xul:vbox class="main-section">
-    <groupbox>
-      <label><html:h2>翻译服务</html:h2></label>
-      <description value="调用本机 DocuTranslate 服务所需的配置。右键文献条目即可翻译。"/>
+<div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, 'Segoe UI', sans-serif; color: #1a1a1a; padding: 16px 20px; max-width: 720px; font-size: 13px;">
+  <style>
+    .dt-section { background: #fafafa; border: 1px solid #e4e4e4; border-radius: 6px;
+                  padding: 14px 18px; margin-bottom: 16px; }
+    .dt-section h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; color: #222; }
+    .dt-section p  { font-size: 12px; color: #888; margin: 0 0 12px; }
+    .dt-field { margin: 8px 0; }
+    .dt-field label { display: block; margin-bottom: 4px; color: #444; font-size: 12px; }
+    .dt-field input { display: block; width: 100%; box-sizing: border-box;
+                     padding: 6px 10px; border: 1px solid #c0c0c0; border-radius: 4px;
+                     font: inherit; background: #fff; color: #1a1a1a; }
+    .dt-field input[type=number] { max-width: 160px; }
+  </style>
 
-      <hbox align="center" style="padding: 2px 0;">
-        <label value="API Key" control="dt-apiKey" style="width: 130px; min-width: 130px;"/>
-        <textbox id="dt-apiKey" type="password" style="width: 450px; min-width: 450px;"/>
-      </hbox>
-      <hbox align="center" style="padding: 2px 0;">
-        <label value="API 地址" control="dt-baseUrl" style="width: 130px; min-width: 130px;"/>
-        <textbox id="dt-baseUrl" style="width: 450px; min-width: 450px;"/>
-      </hbox>
-      <hbox align="center" style="padding: 2px 0;">
-        <label value="模型 ID" control="dt-modelId" style="width: 130px; min-width: 130px;"/>
-        <textbox id="dt-modelId" style="width: 450px; min-width: 450px;"/>
-      </hbox>
-      <hbox align="center" style="padding: 2px 0;">
-        <label value="翻译目标语言" control="dt-toLang" style="width: 130px; min-width: 130px;"/>
-        <textbox id="dt-toLang" style="width: 450px; min-width: 450px;"/>
-      </hbox>
-      <hbox align="center" style="padding: 2px 0;">
-        <label value="思考模式" control="dt-thinking" style="width: 130px; min-width: 130px;"/>
-        <textbox id="dt-thinking" style="width: 450px; min-width: 450px;"/>
-      </hbox>
-    </groupbox>
+  <div class="dt-section">
+    <h2>翻译服务</h2>
+    <p>右键文献条目即可翻译；修改后自动保存。</p>
+    <div class="dt-field">
+      <label for="dt-apiKey">API Key</label>
+      <input id="dt-apiKey" type="password" autocomplete="off"/>
+    </div>
+    <div class="dt-field">
+      <label for="dt-baseUrl">API 地址</label>
+      <input id="dt-baseUrl"/>
+    </div>
+    <div class="dt-field">
+      <label for="dt-modelId">模型 ID</label>
+      <input id="dt-modelId"/>
+    </div>
+    <div class="dt-field">
+      <label for="dt-toLang">翻译目标语言</label>
+      <input id="dt-toLang"/>
+    </div>
+    <div class="dt-field">
+      <label for="dt-thinking">思考模式</label>
+      <input id="dt-thinking"/>
+    </div>
+  </div>
 
-    <groupbox>
-      <label><html:h2>PDF 解析（MinerU）</html:h2></label>
-      <description value="解析 PDF 时的 MinerU 服务凭据与并发参数。"/>
-
-      <hbox align="center" style="padding: 2px 0;">
-        <label value="MinerU Token" control="dt-mineruToken" style="width: 130px; min-width: 130px;"/>
-        <textbox id="dt-mineruToken" type="password" style="width: 450px; min-width: 450px;"/>
-      </hbox>
-      <hbox align="center" style="padding: 2px 0;">
-        <label value="分块大小" control="dt-chunkSize" style="width: 130px; min-width: 130px;"/>
-        <textbox id="dt-chunkSize" type="number" style="width: 200px; min-width: 200px;"/>
-      </hbox>
-      <hbox align="center" style="padding: 2px 0;">
-        <label value="并发数" control="dt-concurrent" style="width: 130px; min-width: 130px;"/>
-        <textbox id="dt-concurrent" type="number" style="width: 200px; min-width: 200px;"/>
-      </hbox>
-    </groupbox>
-  </xul:vbox>
+  <div class="dt-section">
+    <h2>PDF 解析（MinerU）</h2>
+    <p>解析 PDF 时的 MinerU 服务凭据与并发参数。</p>
+    <div class="dt-field">
+      <label for="dt-mineruToken">MinerU Token</label>
+      <input id="dt-mineruToken" type="password" autocomplete="off"/>
+    </div>
+    <div class="dt-field">
+      <label for="dt-chunkSize">分块大小</label>
+      <input id="dt-chunkSize" type="number"/>
+    </div>
+    <div class="dt-field">
+      <label for="dt-concurrent">并发数</label>
+      <input id="dt-concurrent" type="number"/>
+    </div>
+  </div>
 </div>
