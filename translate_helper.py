@@ -205,6 +205,42 @@ def main():
             PAYLOAD.update({k: v for k, v in cfg.items() if v not in (None, "")})
         except Exception:
             pass
+
+    # === 配置规范化（防止面板填错导致 404 / 429）===
+    # 1) 该字段是 base_url，DocuTranslate 内部会自行拼接 "/chat/completions"。
+    #    若误填完整端点，会出现 ".../chat/completions/chat/completions" -> 404 page not found。
+    bu = str(PAYLOAD.get("base_url", "")).strip().rstrip("/")
+    for suffix in ("/chat/completions", "/completions"):
+        if bu.endswith(suffix):
+            bu = bu[: -len(suffix)].rstrip("/")
+    PAYLOAD["base_url"] = bu
+
+    # 2) 并发与限速：商汤 Token Plan 的 RPM/TPM 额度很紧，并发 >2 必撞 429；
+    #    用内置 rpm 限速器把请求摊开（15 片约 3.5 分钟）。
+    try:
+        PAYLOAD["concurrent"] = max(1, min(int(PAYLOAD.get("concurrent", 2)), 2))
+    except (TypeError, ValueError):
+        PAYLOAD["concurrent"] = 2
+    try:
+        PAYLOAD["rpm"] = max(1, min(int(PAYLOAD.get("rpm") or 4), 4))
+    except (TypeError, ValueError):
+        PAYLOAD["rpm"] = 4
+
+    # 3) 输出上限：轻量模型偶发陷入重复生成，流式响应会涨到几百 KB 仍不结束，
+    #    表现为进度卡在 (n-1)/n 不动。限制 max_tokens 可强制收束。
+    try:
+        extra = json.loads(PAYLOAD.get("extra_body") or "{}")
+        if not isinstance(extra, dict):
+            extra = {}
+    except Exception:
+        extra = {}
+    extra.setdefault("max_tokens", 8192)
+    PAYLOAD["extra_body"] = json.dumps(extra)
+
+    # 4) 推理型模型（deepseek-v4-flash 等）每片先产数百 reasoning token，
+    #    在 Token Plan 的 TPM 额度下多分片必然 429，改用轻量模型。
+    if PAYLOAD.get("model_id") in ("deepseek-v4-flash", "deepseek-v4.1-flash"):
+        PAYLOAD["model_id"] = "sensenova-6.8-flash-lite"
     # trust_env=False: 忽略 http_proxy 等环境代理，回环地址必须直连
     client = httpx.Client(timeout=180, trust_env=False)
 
