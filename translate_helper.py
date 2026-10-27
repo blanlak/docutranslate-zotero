@@ -130,7 +130,22 @@ def translate(pdf, dest_pdf=None):
         time.sleep(2)
 
     setp(95, "下载译文")
-    html = client.get(SERVICE + "/service/download/" + task_id + "/html").text
+    # 必须校验状态码：服务端出错时返回的是 JSON 错误体（如"任务不支持下载 html
+    # 类型的文件，或文件已丢失"），若当成正文保存，最终会生成一份只含 JSON 的 PDF
+    try:
+        dresp = client.get(SERVICE + "/service/download/" + task_id + "/html")
+    except Exception as e:
+        setp(-1, "下载译文失败: " + str(e))
+        return False
+    if dresp.status_code != 200:
+        detail = dresp.text.replace("\n", " ").replace("\r", " ")[:200]
+        setp(-1, "下载译文失败（HTTP " + str(dresp.status_code) + "）：" + detail)
+        return False
+    html = dresp.text
+    stripped = html.lstrip()
+    if stripped.startswith("{") and "detail" in stripped[:300]:
+        setp(-1, "服务端返回错误：" + stripped[:200])
+        return False
     html_path = work / "translated.html"
     html_path.write_text(html, encoding="utf-8")
 
