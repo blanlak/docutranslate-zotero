@@ -415,6 +415,16 @@ async function startup({ id, version, rootURI }, reason) {
     try {
         await Zotero.initializationPromise;
         Zotero.DocuTranslate = Translator;
+        // 迁移旧模型配置到 sensenova-6.8-flash-lite（用户明确要求切换）
+        try {
+            const cur = Zotero.Prefs.get("extensions.zotero.docutranslate.modelId", true);
+            const OLD = ["mimo-v2.5", "mimo-v2.5-pro", "deepseek-v4-flash", "deepseek-v4.1-flash", ""];
+            if (!cur || OLD.indexOf(cur) >= 0) {
+                Zotero.Prefs.set("extensions.zotero.docutranslate.modelId",
+                    "sensenova-6.8-flash-lite", true);
+                log("模型已迁移: " + (cur || "(空)") + " -> sensenova-6.8-flash-lite");
+            }
+        } catch (e) {}
         addMenu(Zotero.getMainWindow());
         // 拦截主窗口 openDialog，捕获 ProgressWindow 子窗口引用（闭包内私有，
         // 外部无法直接拿——必须钩主窗口的 openDialog 才能拿到 chrome window）

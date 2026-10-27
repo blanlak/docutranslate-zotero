@@ -27,9 +27,9 @@ PAYLOAD = {
     "convert_engine": "mineru",
     "model_version": "vlm",
     "formula_ocr": True,
-    "base_url": "https://api.xiaomimimo.com/v1",
+    "base_url": "https://token.sensenova.cn/v1",
     "api_key": "sk-ccctebmk1hwbzol4l8w3rlft9trlbhioit64df24swgti6od",
-    "model_id": "mimo-v2.5",
+    "model_id": "sensenova-6.8-flash-lite",
     "to_lang": "中文",
     "thinking": "disable",
     "chunk_size": 4000,
@@ -239,7 +239,7 @@ def main():
 
     # 4) 推理型模型（deepseek-v4-flash 等）每片先产数百 reasoning token，
     #    在 Token Plan 的 TPM 额度下多分片必然 429，改用轻量模型。
-    if PAYLOAD.get("model_id") in ("deepseek-v4-flash", "deepseek-v4.1-flash"):
+    if PAYLOAD.get("model_id") in ("mimo-v2.5", "mimo-v2.5-pro", "deepseek-v4-flash", "deepseek-v4.1-flash"):
         PAYLOAD["model_id"] = "sensenova-6.8-flash-lite"
     # trust_env=False: 忽略 http_proxy 等环境代理，回环地址必须直连
     client = httpx.Client(timeout=180, trust_env=False)
