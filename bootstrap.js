@@ -17,20 +17,82 @@ if (typeof Zotero === "undefined") {
 
 var MENU_ID = "docutranslate-itemmenu";
 
+// 运行期路径全部动态解析（不留任何个人路径）：优先取设置面板的值，
+// 其次自动探测常见安装位置。helperScript 会在每次启动时从插件包解出到
+// 用户配置目录，保证与本插件版本一致。
 var CONFIG = {
     pythonwExe: "",
-    helperScript: "translate_helper.py",
+    helperScript: "",
     serviceExe: "",
+    serviceCwd: "",
+    serviceUrl: "http://127.0.0.1:8010",
     edgeCandidates: [
         "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
         "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"
     ]
 };
 
+var RUNTIME_DIR = "";   // <profile>/docutranslate
+var TRACE_FILE = "";    // <profile>/docutranslate/trace.log
+
+function prefGet(name, fallback) {
+    try {
+        const v = Zotero.Prefs.get("extensions.zotero.docutranslate." + name, true);
+        return (v === undefined || v === null || v === "") ? (fallback || "") : v;
+    } catch (e) {
+        return fallback || "";
+    }
+}
+
+function pathExistsSync(p) {
+    try {
+        if (!p) return false;
+        if (typeof Zotero.File.pathExists === "function") {
+            return Zotero.File.pathExists(p);
+        }
+        const f = Components.classes["@mozilla.org/file/local;1"]
+            .createInstance(Components.interfaces.nsIFile);
+        f.initWithPath(p);
+        return f.exists();
+    } catch (e) {
+        return false;
+    }
+}
+
+// 自动探测 docutranslate 的 conda 环境（pythonw.exe / docutranslate.exe）
+function probeEnv(kind) {
+    const home = prefGet("__home", "");
+    const candidates = [];
+    const userProfile = (function () {
+        try {
+            return Services.dirsvc.get("Home", Components.interfaces.nsIFile).path;
+        } catch (e) {
+            return "";
+        }
+    })();
+    const bases = [
+        userProfile ? userProfile + "\\miniforge3" : "",
+        userProfile ? userProfile + "\\miniconda3" : "",
+        userProfile ? userProfile + "\\anaconda3" : "",
+        "C:\\ProgramData\\miniforge3",
+        "C:\\ProgramData\\miniconda3",
+        "C:\\ProgramData\\anaconda3"
+    ].filter(Boolean);
+    for (const b of bases) {
+        candidates.push(kind === "pythonw"
+            ? b + "\\envs\\docutranslate\\pythonw.exe"
+            : b + "\\envs\\docutranslate\\Scripts\\docutranslate.exe");
+    }
+    for (const c of candidates) {
+        if (pathExistsSync(c)) return c;
+    }
+    return "";
+}
+
 function log(msg) {
     Zotero.debug("[docutranslate] " + msg);
     try {
-        const path = "translate_helper.py";
+        const path = TRACE_FILE || (Zotero.getTempDirectory().path + "\\docutranslate_trace.log");
         const line = new Date().toISOString() + " " + msg + "\n";
         // IOUtils 的 append 选项不可靠（多次调用互相覆盖），改读-合并-写
         IOUtils.readUTF8(path)
@@ -174,17 +236,23 @@ var Translator = {
             Zotero.File.createDirectoryIfMissing(workDir);
             const P = "extensions.zotero.docutranslate.";
             const cfg = {
-                api_key: Zotero.Prefs.get(P + "apiKey", true) || "",
-                base_url: Zotero.Prefs.get(P + "baseUrl", true) || "",
-                model_id: Zotero.Prefs.get(P + "modelId", true) || "",
-                to_lang: Zotero.Prefs.get(P + "toLang", true) || "中文",
-                thinking: Zotero.Prefs.get(P + "thinking", true) || "disable",
-                mineru_token: Zotero.Prefs.get(P + "mineruToken", true) || "",
-                chunk_size: parseInt(Zotero.Prefs.get(P + "chunkSize", true), 10) || 4000,
-                concurrent: parseInt(Zotero.Prefs.get(P + "concurrent", true), 10) || 10
+                api_key: prefGet("apiKey"),
+                base_url: prefGet("baseUrl"),
+                model_id: prefGet("modelId"),
+                to_lang: prefGet("toLang", "中文"),
+                thinking: prefGet("thinking", "disable"),
+                mineru_token: prefGet("mineruToken"),
+                chunk_size: parseInt(prefGet("chunkSize", "4000"), 10) || 4000,
+                concurrent: parseInt(prefGet("concurrent", "10"), 10) || 10,
+                // 运行环境（其他电脑首次使用时由设置面板填写，留空则自动探测）
+                service_url: CONFIG.serviceUrl,
+                service_exe: CONFIG.serviceExe,
+                service_cwd: CONFIG.serviceCwd,
+                edge_path: prefGet("edgePath")
             };
             await writeUTF8(workDir + "\\config.json", JSON.stringify(cfg));
-            log("配置: model=" + cfg.model_id + " base=" + cfg.base_url);
+            log("配置: model=" + cfg.model_id + " base=" + cfg.base_url +
+                " service=" + cfg.service_url);
 
             // 3. 事件驱动编排：启动 helper（进程退出时 observer 同步触发挂载），
             //    nsITimer 每秒同步读进度文件刷新弹窗——全程无 await 轮询
@@ -293,8 +361,12 @@ var Translator = {
 
             // 启动一次进程（唯一一次 nsIProcess 调用）
             try {
-                if (!fileExistsSync(CONFIG.pythonwExe)) {
-                    throw new Error("pythonw 不存在: " + CONFIG.pythonwExe);
+                if (!CONFIG.pythonwExe || !fileExistsSync(CONFIG.pythonwExe)) {
+                    throw new Error("未找到 pythonw.exe。请到 Zotero 设置 → DocuTranslate 翻译 → " +
+                        "运行环境 中填写 Python 路径（如 …\\envs\\docutranslate\\pythonw.exe）");
+                }
+                if (!CONFIG.helperScript || !fileExistsSync(CONFIG.helperScript)) {
+                    throw new Error("助手脚本缺失，请重新安装插件（未解包成功）");
                 }
                 const file = makeNsIFile(CONFIG.pythonwExe);
                 const proc = Components.classes["@mozilla.org/process/util;1"]
@@ -379,6 +451,21 @@ var Translator = {
         }
     },
 
+    // 供设置面板“自动探测”调用：返回探测到的本机路径
+    probeEnvInfo() {
+        try {
+            return {
+                pythonwExe: CONFIG.pythonwExe || probeEnv("pythonw"),
+                serviceExe: CONFIG.serviceExe || probeEnv("docutranslate"),
+                serviceCwd: CONFIG.serviceCwd || "",
+                helperScript: CONFIG.helperScript || ""
+            };
+        } catch (e) {
+            log("probeEnvInfo 失败: " + e);
+            return { pythonwExe: "", serviceExe: "", serviceCwd: "", helperScript: "" };
+        }
+    },
+
     notify(msg, isError) {
         const pw = new Zotero.ProgressWindow();
         pw.changeHeadline("DocuTranslate 翻译");
@@ -411,10 +498,51 @@ function removeMenu(win) {
     if (el) el.remove();
 }
 
+// 运行时初始化：解包助手脚本到用户配置目录，解析并探测所有依赖路径
+async function ensureRuntime(rootURI) {
+    try {
+        let profDir = "";
+        try {
+            profDir = Services.dirsvc.get("ProfD", Components.interfaces.nsIFile).path;
+        } catch (e) {}
+        RUNTIME_DIR = profDir ? (profDir + "\\docutranslate")
+            : (Zotero.getTempDirectory().path + "\\docutranslate");
+        Zotero.File.createDirectoryIfMissing(RUNTIME_DIR);
+        TRACE_FILE = RUNTIME_DIR + "\\trace.log";
+    } catch (e) {}
+
+    // 1) 每次启动从插件包解出助手脚本（保证与插件版本一致，且不依赖用户目录布局）
+    try {
+        const helperPath = RUNTIME_DIR + "\\translate_helper.py";
+        const content = Zotero.File.getContentsFromURL(rootURI + "translate_helper.py");
+        if (content && content.length > 500) {
+            await IOUtils.writeUTF8(helperPath, content);
+            CONFIG.helperScript = helperPath;
+        }
+    } catch (e) {
+        log("解包助手脚本失败: " + e);
+    }
+
+    // 2) 路径：设置面板 > 自动探测
+    CONFIG.pythonwExe = prefGet("pythonExe") || probeEnv("pythonw");
+    CONFIG.serviceExe = prefGet("serviceExe") || probeEnv("docutranslate");
+    CONFIG.serviceCwd = prefGet("serviceCwd");
+    CONFIG.serviceUrl = prefGet("serviceUrl", "http://127.0.0.1:8010").replace(/\/+$/, "");
+    const edgePref = prefGet("edgePath");
+    if (edgePref) CONFIG.edgeCandidates = [edgePref];
+
+    log("运行环境: helper=" + CONFIG.helperScript +
+        " | python=" + (CONFIG.pythonwExe || "(未找到)") +
+        " | service=" + CONFIG.serviceUrl +
+        " | serviceExe=" + (CONFIG.serviceExe || "(未找到)"));
+}
+
 async function startup({ id, version, rootURI }, reason) {
     try {
         await Zotero.initializationPromise;
         Zotero.DocuTranslate = Translator;
+        // 运行时初始化（解包助手 + 解析路径）
+        await ensureRuntime(rootURI);
         // 迁移旧模型配置到 sensenova-6.8-flash-lite（用户明确要求切换）
         try {
             const cur = Zotero.Prefs.get("extensions.zotero.docutranslate.modelId", true);

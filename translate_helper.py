@@ -7,20 +7,55 @@
 进度文件: work_dir/progress.txt，格式 "<百分比> <消息>"；-1 失败
 """
 import json
+import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import time
 
 import httpx
 
+# 所有本机相关路径均不写死：优先取 config.json（插件设置面板填写），
+# 其次自动探测常见安装位置，最后才报错提示用户去设置里填写。
 SERVICE = "http://127.0.0.1:8010"
-SERVICE_EXE = r""
-SERVICE_CWD = r""
+SERVICE_EXE = ""   # 由 config.json 的 service_exe 提供，或自动探测
+SERVICE_CWD = ""   # 由 config.json 的 service_cwd 提供
 EDGE_CANDIDATES = [
     r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
     r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
 ]
+
+
+def _probe_service_exe():
+    """自动探测 docutranslate.exe：PATH -> 常见 conda 环境位置"""
+    exe = shutil.which("docutranslate")
+    if exe and exe.lower().endswith(".exe"):
+        return exe
+    home = pathlib.Path(os.environ.get("USERPROFILE") or "")
+    pdirs = [pathlib.Path(os.environ.get("ProgramData") or "C:/ProgramData")]
+    candidates = []
+    for base in [home / "miniforge3", home / "miniconda3", home / "anaconda3",
+                 pdirs[0] / "miniforge3", pdirs[0] / "miniconda3", pdirs[0] / "anaconda3"]:
+        candidates.append(base / "envs" / "docutranslate" / "Scripts" / "docutranslate.exe")
+    for c in candidates:
+        try:
+            if c.is_file():
+                return str(c)
+        except Exception:
+            pass
+    return ""
+
+
+def _probe_edge():
+    for e in EDGE_CANDIDATES:
+        try:
+            if pathlib.Path(e).is_file():
+                return e
+        except Exception:
+            pass
+    return ""
+
 
 PAYLOAD = {
     "workflow_type": "markdown_based",
@@ -61,13 +96,17 @@ def ensure_service():
             return True
 
     setp(4, "服务未启动，正在拉起（约需 10 秒）…")
+    if not SERVICE_EXE:
+        setp(-1, "未配置 DocuTranslate 服务程序路径：请在 Zotero 设置 → DocuTranslate 翻译 → "
+                 "服务启动路径 中填写 docutranslate.exe 的完整路径")
+        return False
     # CREATE_NEW_CONSOLE = 独立控制台；CREATE_BREAKAWAY_FROM_JOB = 脱离父作业对象
     try:
-        subprocess.Popen([SERVICE_EXE, "-i"], cwd=SERVICE_CWD,
+        subprocess.Popen([SERVICE_EXE, "-i"], cwd=SERVICE_CWD or None,
                          creationflags=subprocess.CREATE_NEW_CONSOLE | 0x01000000)
     except Exception:
         try:
-            subprocess.Popen([SERVICE_EXE, "-i"], cwd=SERVICE_CWD,
+            subprocess.Popen([SERVICE_EXE, "-i"], cwd=SERVICE_CWD or None,
                              creationflags=subprocess.CREATE_NEW_CONSOLE)
         except Exception as e:
             setp(-1, "拉起翻译服务失败: {}".format(e))
@@ -156,7 +195,7 @@ def translate(pdf, dest_pdf=None):
 
     # ===== Edge 无头打印为 PDF（在助手里做，插件只启动一次进程）=====
     setp(96, "生成 PDF（Edge 打印）…")
-    edge = next((e for e in EDGE_CANDIDATES if pathlib.Path(e).exists()), None)
+    edge = next((e for e in EDGE_CANDIDATES if pathlib.Path(e).exists()), None) or _probe_edge()
     if not edge:
         setp(-1, "未找到 Edge 浏览器，无法打印 PDF")
         return False
@@ -201,7 +240,7 @@ def translate(pdf, dest_pdf=None):
 
 
 def main():
-    global work, client
+    global work, client, SERVICE, SERVICE_EXE, SERVICE_CWD, EDGE_CANDIDATES
     args = sys.argv[1:]
     # 兼容旧模式参数：首参数若是模式名则跳过
     if args and args[0] in ("run", "ensure", "wait", "launch", "translate"):
@@ -214,12 +253,28 @@ def main():
     work.mkdir(parents=True, exist_ok=True)
     # 读取插件写入的配置（设置面板可改），覆盖默认值
     cfgp = work / "config.json"
+    cfg = {}
     if cfgp.exists():
         try:
             cfg = json.loads(cfgp.read_text(encoding="utf-8"))
             PAYLOAD.update({k: v for k, v in cfg.items() if v not in (None, "")})
         except Exception:
             pass
+
+    # === 本机路径：配置优先，其次自动探测 ===
+    SERVICE = str(cfg.get("service_url") or SERVICE).rstrip("/")
+    SERVICE_EXE = str(cfg.get("service_exe") or "").strip()
+    SERVICE_CWD = str(cfg.get("service_cwd") or "").strip()
+    if not SERVICE_EXE:
+        SERVICE_EXE = _probe_service_exe()
+    if SERVICE_EXE and not SERVICE_CWD:
+        # 约定：<env>/Scripts/docutranslate.exe -> 仓库目录通常需用户填写，
+        # 探测失败时退回 exe 所在目录，至少能让服务自身正常启动
+        SERVICE_CWD = str(pathlib.Path(SERVICE_EXE).parent)
+
+    edge_cfg = str(cfg.get("edge_path") or "").strip()
+    if edge_cfg:
+        EDGE_CANDIDATES = [edge_cfg]
 
     # === 配置规范化（防止面板填错导致 404 / 429）===
     # 1) 该字段是 base_url，DocuTranslate 内部会自行拼接 "/chat/completions"。
@@ -256,8 +311,9 @@ def main():
     #    在 Token Plan 的 TPM 额度下多分片必然 429，改用轻量模型。
     if PAYLOAD.get("model_id") in ("mimo-v2.5", "mimo-v2.5-pro", "deepseek-v4-flash", "deepseek-v4.1-flash"):
         PAYLOAD["model_id"] = "sensenova-6.8-flash-lite"
-    # trust_env=False: 忽略 http_proxy 等环境代理，回环地址必须直连
-    client = httpx.Client(timeout=180, trust_env=False)
+    # 回环地址必须直连（忽略 http_proxy）；远端服务则走系统代理
+    _is_local = SERVICE.startswith(("http://127.0.0.1", "http://localhost"))
+    client = httpx.Client(timeout=180, trust_env=not _is_local)
 
     try:
         setp(2, "检查本地翻译服务")

@@ -4,6 +4,11 @@
 (function () {
     const PREFIX = "extensions.zotero.docutranslate.";
     const FIELDS = [
+        ["dt-serviceUrl", "serviceUrl", "string"],
+        ["dt-pythonExe", "pythonExe", "string"],
+        ["dt-serviceExe", "serviceExe", "string"],
+        ["dt-serviceCwd", "serviceCwd", "string"],
+        ["dt-edgePath", "edgePath", "string"],
         ["dt-apiKey", "apiKey", "string"],
         ["dt-baseUrl", "baseUrl", "string"],
         ["dt-modelId", "modelId", "string"],
@@ -45,14 +50,53 @@
         if (d) d.innerHTML = detail || "";
     }
 
+    function saveAll() {
+        for (let [id, name, type] of FIELDS) saveField(id, name, type);
+    }
+
+    // 自动探测本机环境（路径由插件侧探测，这里只负责回填）
+    function probe() {
+        const out = document.getElementById("dt-probe-result");
+        try {
+            const info = (Zotero.DocuTranslate && Zotero.DocuTranslate.probeEnvInfo)
+                ? Zotero.DocuTranslate.probeEnvInfo() : null;
+            if (!info) {
+                if (out) out.textContent = "探测不可用";
+                return;
+            }
+            const map = [
+                ["dt-pythonExe", "pythonExe", info.pythonwExe],
+                ["dt-serviceExe", "serviceExe", info.serviceExe],
+                ["dt-serviceCwd", "serviceCwd", info.serviceCwd]
+            ];
+            let found = 0;
+            for (const [id, name, val] of map) {
+                const input = document.getElementById(id);
+                if (input && val) {
+                    input.value = val;
+                    try { Zotero.Prefs.set(PREFIX + name, val, true); } catch (e) {}
+                    found++;
+                }
+            }
+            if (out) {
+                out.textContent = found
+                    ? "已填入 " + found + " 项（可手动修改）"
+                    : "未探测到，请手动填写";
+                out.style.color = found ? "#1a7f37" : "#c62828";
+            }
+        } catch (e) {
+            if (out) out.textContent = "探测失败：" + (e.message || e);
+        }
+    }
+
     async function testApi() {
         const btn = document.getElementById("dt-test");
-        // 先把当前输入框的值落盘（避免用户粘贴后未失焦导致读到旧值）
-        for (let [id, name, type] of FIELDS) saveField(id, name, type);
+        saveAll();
 
         const key = (getPref("apiKey", "") || "").trim();
         const base = (getPref("baseUrl", "") || "").trim().replace(/\/+$/, "");
         const model = (getPref("modelId", "") || "").trim();
+        const svc = (getPref("serviceUrl", "http://127.0.0.1:8010") || "").trim().replace(/\/+$/, "");
 
         if (!base) {
             setResult(false, "✗ 请先填写 API 地址");
@@ -69,14 +113,13 @@
         }
         setResult(false, "测试中…", "");
 
-        const url = base + "/chat/completions";
-        const t0 = Date.now();
         let apiLine = "";
         let apiOk = false;
         try {
+            const t0 = Date.now();
             const ctrl = new AbortController();
             const timer = setTimeout(() => ctrl.abort(), 20000);
-            const resp = await fetch(url, {
+            const resp = await fetch(base + "/chat/completions", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -107,18 +150,18 @@
                 ((e && (e.name === "AbortError" ? "超时（20 秒）" : e.message)) || e);
         }
 
-        // 顺带检查本地翻译服务
+        // 顺带检查 DocuTranslate 服务（地址可在“运行环境”里改）
         let localLine = "";
         try {
             const ctrl2 = new AbortController();
-            const t2 = setTimeout(() => ctrl2.abort(), 4000);
-            const r2 = await fetch("http://127.0.0.1:8010/service/meta", { signal: ctrl2.signal });
+            const t2 = setTimeout(() => ctrl2.abort(), 5000);
+            const r2 = await fetch(svc + "/service/meta", { signal: ctrl2.signal });
             clearTimeout(t2);
             localLine = r2.ok
-                ? "本地翻译服务：✓ 运行中（127.0.0.1:8010）"
-                : "本地翻译服务：✗ 响应异常 HTTP " + r2.status;
+                ? "DocuTranslate 服务：✓ 运行中（" + svc + "）"
+                : "DocuTranslate 服务：✗ 响应异常 HTTP " + r2.status;
         } catch (e) {
-            localLine = "本地翻译服务：✗ 未启动（右键翻译时会自动拉起）";
+            localLine = "DocuTranslate 服务：✗ 未启动（翻译时会自动拉起）";
         }
 
         setResult(apiOk, apiOk ? "✓ 可用" : "✗ 不可用",
@@ -156,6 +199,13 @@
             btn.addEventListener("click", function (e) {
                 e.preventDefault();
                 testApi();
+            });
+        }
+        const probeBtn = document.getElementById("dt-probe");
+        if (probeBtn) {
+            probeBtn.addEventListener("click", function (e) {
+                e.preventDefault();
+                probe();
             });
         }
     }
