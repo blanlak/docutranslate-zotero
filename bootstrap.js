@@ -148,6 +148,58 @@ function probeEnv(kind) {
     return "";
 }
 
+// 探测 DocuTranslate 本体所在目录（服务启动时的工作目录）
+// 判定依据：目录内存在 docutranslate 包或 README_ZH.md 等特征文件
+function probeServiceCwd() {
+    const drives = ["C:", "D:", "E:", "F:"];
+    const looksLikeRepo = (p) =>
+        pathExistsSync(p + "\\docutranslate\\app.py") ||
+        pathExistsSync(p + "\\docutranslate\\__init__.py") ||
+        pathExistsSync(p + "\\README_ZH.md") ||
+        pathExistsSync(p + "\\DocuTranslate.ico");
+
+    // 1) 盘根：E:\docutranslate
+    for (const d of drives) {
+        const c = d + "\\docutranslate";
+        if (looksLikeRepo(c)) return c;
+    }
+    // 2) 一级子目录：D:\devtools\docutranslate / D:\program\docutranslate
+    for (const d of drives) {
+        let entries = [];
+        try {
+            const dir = Components.classes["@mozilla.org/file/local;1"]
+                .createInstance(Components.interfaces.nsIFile);
+            dir.initWithPath(d + "\\");
+            if (!dir.exists()) continue;
+            const it = dir.directoryEntries;
+            while (it.hasMoreElements()) {
+                const sub = it.getNext().QueryInterface(Components.interfaces.nsIFile);
+                if (sub.isDirectory()) entries.push(sub.path);
+            }
+        } catch (e) { continue; }
+        for (const e of entries.slice(0, 40)) {
+            if (looksLikeRepo(e)) return e;
+            const c = e + "\\docutranslate";
+            if (looksLikeRepo(c)) return c;
+        }
+    }
+    return "";
+}
+
+// 探测可用于 HTML→PDF 的浏览器（Edge 优先，其次 Chrome）
+function probeEdgePath() {
+    const cands = [
+        "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+        "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
+    ];
+    for (const c of cands) {
+        if (pathExistsSync(c)) return c;
+    }
+    return "";
+}
+
 function log(msg) {
     Zotero.debug("[docutranslate] " + msg);
     try {
@@ -519,14 +571,14 @@ var Translator = {
     probeEnvInfo() {
         try {
             return {
-                pythonwExe: CONFIG.pythonwExe || probeEnv("pythonw"),
                 serviceExe: CONFIG.serviceExe || probeEnv("docutranslate"),
-                serviceCwd: CONFIG.serviceCwd || "",
+                serviceCwd: CONFIG.serviceCwd || probeServiceCwd(),
+                edgePath: prefGet("edgePath") || probeEdgePath(),
                 helperScript: CONFIG.helperScript || ""
             };
         } catch (e) {
             log("probeEnvInfo 失败: " + e);
-            return { pythonwExe: "", serviceExe: "", serviceCwd: "", helperScript: "" };
+            return { serviceExe: "", serviceCwd: "", edgePath: "", helperScript: "" };
         }
     },
 

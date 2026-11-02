@@ -64,7 +64,8 @@
             }
             const map = [
                 ["dt-serviceExe", "serviceExe", info.serviceExe],
-                ["dt-serviceCwd", "serviceCwd", info.serviceCwd]
+                ["dt-serviceCwd", "serviceCwd", info.serviceCwd],
+                ["dt-edgePath", "edgePath", info.edgePath]
             ];
             let found = 0;
             for (const [id, name, val] of map) {
