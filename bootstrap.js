@@ -145,6 +145,72 @@ function probeEnv(kind) {
             }
         }
     }
+
+    // 便携版（PyInstaller 单文件，如 DocuTranslate-1.7.10-win.exe）：
+    // 名称形如 DocuTranslate*.exe，位置任意（桌面/下载/解压目录）
+    if (kind === "docutranslate") {
+        const portable = probePortableExe();
+        if (portable) return portable;
+    }
+    return "";
+}
+
+// 列出目录下的所有条目（文件 + 目录）
+function listEntries(p) {
+    const out = [];
+    try {
+        const d = Components.classes["@mozilla.org/file/local;1"]
+            .createInstance(Components.interfaces.nsIFile);
+        d.initWithPath(p);
+        if (!d.exists() || !d.isDirectory()) return out;
+        const it = d.directoryEntries;
+        while (it.hasMoreElements()) {
+            out.push(it.getNext().QueryInterface(Components.interfaces.nsIFile));
+        }
+    } catch (e) {}
+    return out;
+}
+
+// 在单个目录里找便携版可执行文件
+function findPortableInDir(dirPath) {
+    for (const f of listEntries(dirPath)) {
+        try {
+            if (!f.isFile()) continue;
+            const n = f.leafName.toLowerCase();
+            if (n === "dt_helper.exe") continue;   // 本插件自带的助手，排除
+            if (n.indexOf("docutranslate") === 0 && n.endsWith(".exe")) {
+                return f.path;
+            }
+        } catch (e) {}
+    }
+    return "";
+}
+
+// 扫描便携版位置：用户桌面/下载/文档 -> 各盘根 -> 各盘一级目录
+function probePortableExe() {
+    const dirs = [];
+    try {
+        const home = Services.dirsvc.get("Home", Components.interfaces.nsIFile).path;
+        dirs.push(home + "\\Desktop", home + "\\Downloads", home + "\\Documents");
+    } catch (e) {}
+    for (const d of ["C:", "D:", "E:", "F:"]) dirs.push(d + "\\");
+
+    for (const d of dirs) {
+        const hit = findPortableInDir(d);
+        if (hit) return hit;
+    }
+
+    const skip = ["Windows", "Program Files", "Program Files (x86)", "ProgramData",
+        "$Recycle.Bin", "System Volume Information", "node_modules"];
+    for (const d of ["C:", "D:", "E:", "F:"]) {
+        for (const sub of listEntries(d + "\\")) {
+            try {
+                if (!sub.isDirectory() || skip.indexOf(sub.leafName) >= 0) continue;
+            } catch (e) { continue; }
+            const hit = findPortableInDir(sub.path);
+            if (hit) return hit;
+        }
+    }
     return "";
 }
 
@@ -570,9 +636,16 @@ var Translator = {
     // 供设置面板“自动探测”调用：返回探测到的本机路径
     probeEnvInfo() {
         try {
+            const exe = CONFIG.serviceExe || probeEnv("docutranslate");
+            let cwd = CONFIG.serviceCwd || probeServiceCwd();
+            // 便携版没有"项目目录"概念，退回 exe 所在目录（仅用于显示/启动上下文）
+            if (!cwd && exe) {
+                const i = exe.lastIndexOf("\\");
+                if (i > 0) cwd = exe.substring(0, i);
+            }
             return {
-                serviceExe: CONFIG.serviceExe || probeEnv("docutranslate"),
-                serviceCwd: CONFIG.serviceCwd || probeServiceCwd(),
+                serviceExe: exe,
+                serviceCwd: cwd,
                 edgePath: prefGet("edgePath") || probeEdgePath(),
                 helperScript: CONFIG.helperScript || ""
             };
