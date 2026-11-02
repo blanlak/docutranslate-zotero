@@ -34,6 +34,71 @@ var CONFIG = {
 
 var RUNTIME_DIR = "";   // <profile>/docutranslate
 var TRACE_FILE = "";    // <profile>/docutranslate/trace.log
+var PLUGIN_ROOT_URI = "";
+
+// 内置助手：优先用已缓存的，缺失时从 Release 下载（20MB 左右，仅首次）
+var HELPER_EXE_NAME = "dt_helper.exe";
+var HELPER_MIN_SIZE = 15 * 1024 * 1024;
+var HELPER_DOWNLOAD_URL =
+    "https://github.com/blanlak/docutranslate-zotero/releases/latest/download/dt_helper.exe";
+
+async function helperExeReady() {
+    try {
+        const p = RUNTIME_DIR + "\\" + HELPER_EXE_NAME;
+        const st = await IOUtils.stat(p);
+        if (st.size > HELPER_MIN_SIZE) return p;
+    } catch (e) {}
+    return "";
+}
+
+// 确保助手 exe 就位：缓存 -> 包内 base64（分块解码）-> Release 下载
+async function ensureHelperExe(onStatus) {
+    let p = await helperExeReady();
+    if (p) { CONFIG.helperExe = p; return p; }
+
+    const exePath = RUNTIME_DIR + "\\" + HELPER_EXE_NAME;
+
+    // 包内 base64（兼容旧包；分块解码，避免单次 atob 超长字符串失败）
+    try {
+        const b64 = Zotero.File.getContentsFromURL(PLUGIN_ROOT_URI + "helper_b64.txt");
+        if (b64 && b64.length > 1000000) {
+            if (onStatus) onStatus("正在准备翻译助手（首次约需几秒）…");
+            const clean = b64.replace(/\s+/g, "");
+            const out = new Uint8Array(Math.floor(clean.length * 3 / 4) + 3);
+            let offset = 0;
+            const CHUNK = 4 * 1024 * 1024;   // 4MB 文本一块（4 的倍数）
+            for (let i = 0; i < clean.length; i += CHUNK) {
+                const part = clean.slice(i, i + CHUNK);
+                const bin = atob(part);
+                for (let j = 0; j < bin.length; j++) out[offset++] = bin.charCodeAt(j);
+            }
+            await IOUtils.write(exePath, out.subarray(0, offset));
+            p = await helperExeReady();
+            if (p) { CONFIG.helperExe = p; log("助手已从包内解出: " + (offset / 1048576).toFixed(1) + " MB"); return p; }
+        }
+    } catch (e) {
+        log("包内解包失败: " + e);
+    }
+
+    // 从 Release 下载
+    try {
+        if (onStatus) onStatus("正在下载翻译助手（首次约 20MB，请稍候）…");
+        const resp = await fetch(HELPER_DOWNLOAD_URL);
+        if (resp.ok) {
+            const buf = await resp.arrayBuffer();
+            if (buf.byteLength > HELPER_MIN_SIZE) {
+                await IOUtils.write(exePath, new Uint8Array(buf));
+                p = await helperExeReady();
+                if (p) { CONFIG.helperExe = p; log("助手已下载: " + (buf.byteLength / 1048576).toFixed(1) + " MB"); return p; }
+            }
+        } else {
+            log("下载助手失败 HTTP " + resp.status);
+        }
+    } catch (e) {
+        log("下载助手异常: " + e);
+    }
+    return "";
+}
 
 function prefGet(name, fallback) {
     try {
@@ -481,6 +546,15 @@ var Translator = {
             const pdfDir = pdfPath.substring(0, pdfPath.lastIndexOf("\\"));
             const destPdf = pdfDir + "\\" + safeName;
             log("译文目标: " + destPdf);
+            // 首次使用：准备翻译助手（包内解包或从 Release 下载，约 20MB，仅一次）
+            if (!CONFIG.helperExe || !fileExistsSync(CONFIG.helperExe)) {
+                try { progress.setText("准备翻译助手（首次约 20MB）…"); } catch (e) {}
+                const got = await ensureHelperExe(function (msg) {
+                    try { progress.setText(msg); } catch (e) {}
+                });
+                if (got) CONFIG.helperExe = got;
+            }
+
             const ok = await this.runTranslateAndMount(
                 pdfPath, workDir, destPdf, safeName, title, item.id, progress);
             if (!ok) {
@@ -582,7 +656,7 @@ var Translator = {
                 let exePath = "";
                 let args = [];
                 if (CONFIG.helperExe && fileExistsSync(CONFIG.helperExe)) {
-                    // 首选：插件自带的单文件助手，无需 Python 环境
+                    // 首选：内置单文件助手，无需 Python 环境
                     exePath = CONFIG.helperExe;
                     args = ["run", pdfPath, workDir, destPdf];
                 } else if (CONFIG.pythonwExe && fileExistsSync(CONFIG.pythonwExe) &&
@@ -591,7 +665,7 @@ var Translator = {
                     exePath = CONFIG.pythonwExe;
                     args = [CONFIG.helperScript, "run", pdfPath, workDir, destPdf];
                 } else {
-                    throw new Error("助手组件缺失：请重新安装插件（exe 未解包成功）");
+                    throw new Error("翻译助手准备失败：请检查网络后重试；若仍失败，可重新安装插件");
                 }
                 const file = makeNsIFile(exePath);
                 const proc = Components.classes["@mozilla.org/process/util;1"]
@@ -742,26 +816,15 @@ async function ensureRuntime(rootURI, version) {
         TRACE_FILE = RUNTIME_DIR + "\\trace.log";
     } catch (e) {}
 
-    // 1) 解包助手：优先单文件 exe（无需 Python 环境），按插件版本判断是否需要更新
+    // 1) 助手 exe：已缓存就直接用；缺失留给翻译时按需准备（包内解包或下载）
+    PLUGIN_ROOT_URI = rootURI;
     try {
-        const exePath = RUNTIME_DIR + "\\dt_helper.exe";
-        const verFile = RUNTIME_DIR + "\\helper.version";
-        let curVer = "";
-        try { curVer = (await IOUtils.readUTF8(verFile)).trim(); } catch (e) {}
-        if (curVer !== version || !pathExistsSync(exePath)) {
-            const b64 = Zotero.File.getContentsFromURL(rootURI + "helper_b64.txt");
-            if (b64 && b64.length > 1000000) {
-                const bin = atob(b64.replace(/\s+/g, ""));
-                const u8 = new Uint8Array(bin.length);
-                for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
-                await IOUtils.write(exePath, u8);
-                await IOUtils.writeUTF8(verFile, version);
-                log("已解包助手 exe: " + (u8.length / 1048576).toFixed(1) + " MB");
-            }
+        const ready = await helperExeReady();
+        if (ready) {
+            CONFIG.helperExe = ready;
         }
-        if (pathExistsSync(exePath)) CONFIG.helperExe = exePath;
     } catch (e) {
-        log("解包助手 exe 失败: " + e);
+        log("检查助手 exe 失败: " + e);
     }
 
     // 兜底：开发模式下若没有 exe，解包 .py 并依赖本机 Python
