@@ -88,6 +88,24 @@ def service_up():
         return False
 
 
+def _port_in_use(port=8010):
+    """本机端口是否已被占用（被别的程序占用时，便携版会换端口导致插件连不上）"""
+    import socket
+    # 用连接探测：Windows 下对已被 0.0.0.0 监听的端口仍可 bind 成功，bind 判断不可靠
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(0.6)
+    try:
+        sock.connect(("127.0.0.1", port))
+        return True
+    except OSError:
+        return False
+    finally:
+        try:
+            sock.close()
+        except Exception:
+            pass
+
+
 def ensure_service():
     """检查服务；未启动则拉起并等待就绪。返回 True/False"""
     if service_up():
@@ -95,31 +113,57 @@ def ensure_service():
         if service_up():
             return True
 
-    setp(4, "服务未启动，正在拉起（约需 10 秒）…")
+    setp(4, "服务未启动，正在拉起…")
     if not SERVICE_EXE:
-        setp(-1, "未配置 DocuTranslate 服务程序路径：请在 Zotero 设置 → DocuTranslate 翻译 → "
-                 "服务启动路径 中填写 docutranslate.exe 的完整路径")
+        setp(-1, "未配置 DocuTranslate 程序路径：请到 Zotero 设置 → DocuTranslate 翻译 → "
+                 "运行环境 中填写 docutranslate.exe（或便携版 exe）的完整路径")
         return False
+    if not pathlib.Path(SERVICE_EXE).is_file():
+        setp(-1, "找不到 DocuTranslate 程序：{}".format(SERVICE_EXE))
+        return False
+
+    # 端口被别的程序占用时，服务会自动改用其它端口，插件固定连 8010 必然失败
+    if _port_in_use(8010):
+        setp(-1, "端口 8010 已被其它程序占用，DocuTranslate 会改用其它端口导致无法连接。"
+                 "请先关闭占用 8010 的程序后重试。")
+        return False
+
+    # pip/conda 版 CLI 需要 -i 启动 Web 界面；便携版不解析参数，传了也无害
+    args = [SERVICE_EXE, "-i"]
+    workdir = SERVICE_CWD or str(pathlib.Path(SERVICE_EXE).parent)
     # CREATE_NEW_CONSOLE = 独立控制台；CREATE_BREAKAWAY_FROM_JOB = 脱离父作业对象
+    proc = None
     try:
-        subprocess.Popen([SERVICE_EXE, "-i"], cwd=SERVICE_CWD or None,
-                         creationflags=subprocess.CREATE_NEW_CONSOLE | 0x01000000)
+        proc = subprocess.Popen(args, cwd=workdir,
+                                creationflags=subprocess.CREATE_NEW_CONSOLE | 0x01000000)
     except Exception:
         try:
-            subprocess.Popen([SERVICE_EXE, "-i"], cwd=SERVICE_CWD or None,
-                             creationflags=subprocess.CREATE_NEW_CONSOLE)
+            proc = subprocess.Popen(args, cwd=workdir,
+                                    creationflags=subprocess.CREATE_NEW_CONSOLE)
         except Exception as e:
-            setp(-1, "拉起翻译服务失败: {}".format(e))
+            setp(-1, "无法启动 DocuTranslate：{}".format(e))
             return False
 
-    for _ in range(45):
+    # 进程秒退通常意味着启动失败（被杀毒拦截、缺依赖、路径带特殊字符等）
+    time.sleep(3)
+    if proc.poll() is not None:
+        setp(-1, "DocuTranslate 启动后立即退出（退出码 {}）。常见原因：安全软件拦截、"
+                 "程序文件损坏。请手动双击它确认能否正常启动。".format(proc.returncode))
+        return False
+
+    # 便携版首次运行要解压（约 10-30 秒），慢机器可能更久 —— 最多等 180 秒
+    for i in range(90):
         time.sleep(2)
-        setp(4, "等待翻译服务就绪…")
+        try:
+            setp(4, "等待翻译服务就绪…（{} 秒）".format((i + 1) * 2))
+        except Exception:
+            pass
         if service_up():
             time.sleep(1)
             if service_up():
                 return True
-    setp(-1, "翻译服务启动超时，请手动运行 启动翻译界面.bat 后重试")
+    setp(-1, "翻译服务启动超时（已等 180 秒）。请手动双击 DocuTranslate 启动，"
+             "看到 Uvicorn running on http://127.0.0.1:8010 后再右键翻译。")
     return False
 
 
