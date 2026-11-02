@@ -60,9 +60,11 @@ function pathExistsSync(p) {
 }
 
 // 自动探测 docutranslate 的 conda 环境（pythonw.exe / docutranslate.exe）
+// 策略：常见安装位置 -> 各磁盘浅层扫描（envs/docutranslate），避免要求用户手填
 function probeEnv(kind) {
-    const home = prefGet("__home", "");
-    const candidates = [];
+    const rel = kind === "pythonw"
+        ? "\\envs\\docutranslate\\pythonw.exe"
+        : "\\envs\\docutranslate\\Scripts\\docutranslate.exe";
     const userProfile = (function () {
         try {
             return Services.dirsvc.get("Home", Components.interfaces.nsIFile).path;
@@ -78,13 +80,55 @@ function probeEnv(kind) {
         "C:\\ProgramData\\miniconda3",
         "C:\\ProgramData\\anaconda3"
     ].filter(Boolean);
+
     for (const b of bases) {
-        candidates.push(kind === "pythonw"
-            ? b + "\\envs\\docutranslate\\pythonw.exe"
-            : b + "\\envs\\docutranslate\\Scripts\\docutranslate.exe");
+        if (pathExistsSync(b + rel)) return b + rel;
     }
-    for (const c of candidates) {
-        if (pathExistsSync(c)) return c;
+
+    // 浅层扫描各盘：<root>\<dir>\envs\docutranslate\... 与 <root>\<dir>\<sub>\envs\docutranslate\...
+    const drives = ["C:", "D:", "E:", "F:"];
+    const skip = ["Windows", "Program Files", "Program Files (x86)", "ProgramData",
+        "$Recycle.Bin", "System Volume Information", "Users", "node_modules"];
+    for (const d of drives) {
+        const root = d + "\\";
+        let entries = [];
+        try {
+            const dir = Components.classes["@mozilla.org/file/local;1"]
+                .createInstance(Components.interfaces.nsIFile);
+            dir.initWithPath(root);
+            if (!dir.exists() || !dir.isDirectory()) continue;
+            const it = dir.directoryEntries;
+            while (it.hasMoreElements()) {
+                const sub = it.getNext().QueryInterface(Components.interfaces.nsIFile);
+                if (!sub.isDirectory() || skip.indexOf(sub.leafName) >= 0) continue;
+                entries.push(sub.path);
+            }
+        } catch (e) {
+            continue;
+        }
+        // 一级：D:\miniforge3\envs\...
+        for (const e of entries) {
+            if (pathExistsSync(e + rel)) return e + rel;
+        }
+        // 二级：D:\devtools\py\miniforge3\envs\...（限制一级子目录数量，避免卡顿）
+        for (const e of entries.slice(0, 30)) {
+            let subs = [];
+            try {
+                const dir = Components.classes["@mozilla.org/file/local;1"]
+                    .createInstance(Components.interfaces.nsIFile);
+                dir.initWithPath(e);
+                const it = dir.directoryEntries;
+                while (it.hasMoreElements()) {
+                    const sub = it.getNext().QueryInterface(Components.interfaces.nsIFile);
+                    if (sub.isDirectory()) subs.push(sub.path);
+                }
+            } catch (e2) {
+                continue;
+            }
+            for (const s of subs.slice(0, 20)) {
+                if (pathExistsSync(s + rel)) return s + rel;
+            }
+        }
     }
     return "";
 }
@@ -244,10 +288,10 @@ var Translator = {
                 mineru_token: prefGet("mineruToken"),
                 chunk_size: parseInt(prefGet("chunkSize", "4000"), 10) || 4000,
                 concurrent: parseInt(prefGet("concurrent", "10"), 10) || 10,
-                // 运行环境（其他电脑首次使用时由设置面板填写，留空则自动探测）
-                service_url: CONFIG.serviceUrl,
-                service_exe: CONFIG.serviceExe,
-                service_cwd: CONFIG.serviceCwd,
+                // 运行环境（每次翻译时重新读取，改设置后立即生效）
+                service_url: prefGet("serviceUrl", "http://127.0.0.1:8010").replace(/\/+$/, ""),
+                service_exe: prefGet("serviceExe") || CONFIG.serviceExe,
+                service_cwd: prefGet("serviceCwd") || CONFIG.serviceCwd,
                 edge_path: prefGet("edgePath")
             };
             await writeUTF8(workDir + "\\config.json", JSON.stringify(cfg));
