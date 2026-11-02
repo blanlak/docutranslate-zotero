@@ -22,7 +22,14 @@
         if (!input) return;
         try {
             let val = input.value;
-            if (type === "int") val = parseInt(val, 10) || 0;
+            if (type === "int") {
+                val = parseInt(val, 10) || 0;
+                // 并发数上限 3（SenseNova 60 RPM / 128K TPM）
+                if (name === "concurrent") {
+                    val = Math.max(1, Math.min(val, 3));
+                    if (String(val) !== input.value) input.value = val;
+                }
+            }
             Zotero.Prefs.set(PREFIX + name, val, true);
         } catch (e) {}
     }

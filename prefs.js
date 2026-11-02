@@ -7,7 +7,7 @@ pref("extensions.zotero.docutranslate.toLang", "中文");
 pref("extensions.zotero.docutranslate.thinking", "disable");
 pref("extensions.zotero.docutranslate.mineruToken", "");
 pref("extensions.zotero.docutranslate.chunkSize", 4000);
-pref("extensions.zotero.docutranslate.concurrent", 10);
+pref("extensions.zotero.docutranslate.concurrent", 2);
 
 // 运行环境（留空 = 自动探测）
 pref("extensions.zotero.docutranslate.serviceExe", "");

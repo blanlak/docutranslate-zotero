@@ -68,7 +68,7 @@ PAYLOAD = {
     "to_lang": "中文",
     "thinking": "disable",
     "chunk_size": 4000,
-    "concurrent": 10,
+    "concurrent": 2,
     "temperature": 0.3,
     "timeout": 600,
     "retry": 3,
@@ -289,7 +289,7 @@ def main():
     # 2) 并发与限速：商汤 Token Plan 的 RPM/TPM 额度很紧，并发 >2 必撞 429；
     #    用内置 rpm 限速器把请求摊开（15 片约 3.5 分钟）。
     try:
-        PAYLOAD["concurrent"] = max(1, min(int(PAYLOAD.get("concurrent", 2)), 2))
+        PAYLOAD["concurrent"] = max(1, min(int(PAYLOAD.get("concurrent", 2)), 3))
     except (TypeError, ValueError):
         PAYLOAD["concurrent"] = 2
     try:
