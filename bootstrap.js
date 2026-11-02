@@ -188,28 +188,70 @@ function findPortableInDir(dirPath) {
 
 // 扫描便携版位置：用户桌面/下载/文档 -> 各盘根 -> 各盘一级目录
 function probePortableExe() {
-    const dirs = [];
+    const SKIP = {
+        "windows": 1, "program files": 1, "program files (x86)": 1, "programdata": 1,
+        "$recycle.bin": 1, "system volume information": 1, "node_modules": 1,
+        "appdata": 1, "packages": 1, "drivers": 1, "temp": 1, "tmp": 1,
+        "microsoft": 1, "intel": 1, "amd": 1, "nvidia": 1, "perflogs": 1
+    };
+    const MAX_DIRS = 4000;   // 目录数上限，避免全盘扫描卡死
+    const state = { count: 0 };
+    const seen = {};
+
+    // 广度优先扫描，depth 为剩余层数
+    function scan(root, depth) {
+        const queue = [{ p: root, d: 0 }];
+        while (queue.length) {
+            if (state.count >= MAX_DIRS) return "";
+            const cur = queue.shift();
+            if (seen[cur.p]) continue;
+            seen[cur.p] = 1;
+            state.count++;
+
+            const hit = findPortableInDir(cur.p);
+            if (hit) return hit;
+            if (cur.d >= depth) continue;
+
+            for (const e of listEntries(cur.p)) {
+                let isDir = false, name = "";
+                try {
+                    isDir = e.isDirectory();
+                    name = e.leafName;
+                } catch (err) { continue; }
+                if (!isDir) continue;
+                if (name.charAt(0) === ".") continue;
+                if (SKIP[name.toLowerCase()]) continue;
+                queue.push({ p: e.path, d: cur.d + 1 });
+            }
+        }
+        return "";
+    }
+
+    // 1) 常见位置优先（快）
+    const quick = [];
     try {
         const home = Services.dirsvc.get("Home", Components.interfaces.nsIFile).path;
-        dirs.push(home + "\\Desktop", home + "\\Downloads", home + "\\Documents");
+        quick.push(home + "\\Desktop", home + "\\Downloads", home + "\\Documents");
     } catch (e) {}
-    for (const d of ["C:", "D:", "E:", "F:"]) dirs.push(d + "\\");
-
-    for (const d of dirs) {
-        const hit = findPortableInDir(d);
+    for (const d of ["C:", "D:", "E:", "F:"]) quick.push(d + "\\");
+    for (const q of quick) {
+        const hit = findPortableInDir(q);
         if (hit) return hit;
     }
 
-    const skip = ["Windows", "Program Files", "Program Files (x86)", "ProgramData",
-        "$Recycle.Bin", "System Volume Information", "node_modules"];
-    for (const d of ["C:", "D:", "E:", "F:"]) {
-        for (const sub of listEntries(d + "\\")) {
-            try {
-                if (!sub.isDirectory() || skip.indexOf(sub.leafName) >= 0) continue;
-            } catch (e) { continue; }
-            const hit = findPortableInDir(sub.path);
+    // 2) 用户目录深层扫描（桌面/下载/文档 下 4 层）
+    try {
+        const home = Services.dirsvc.get("Home", Components.interfaces.nsIFile).path;
+        for (const base of [home + "\\Desktop", home + "\\Downloads", home + "\\Documents"]) {
+            const hit = scan(base, 4);
             if (hit) return hit;
         }
+    } catch (e) {}
+
+    // 3) 各盘浅层深扫（3 层，跳过系统目录）
+    for (const d of ["D:", "E:", "F:", "C:"]) {
+        const hit = scan(d + "\\", 3);
+        if (hit) return hit;
     }
     return "";
 }

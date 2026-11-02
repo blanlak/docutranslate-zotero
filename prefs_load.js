@@ -54,6 +54,16 @@
     // 自动探测本机环境（路径由插件侧探测，这里只负责回填）
     function probe() {
         const out = document.getElementById("dt-probe-result");
+        if (out) {
+            out.textContent = "扫描中，请稍候…";
+            out.style.color = "#666";
+        }
+        // 深层扫描可能耗时 1-3 秒，先让界面刷新出提示再执行
+        setTimeout(function () { probeRun(); }, 50);
+    }
+
+    function probeRun() {
+        const out = document.getElementById("dt-probe-result");
         try {
             const info = (Zotero.DocuTranslate && Zotero.DocuTranslate.probeEnvInfo)
                 ? Zotero.DocuTranslate.probeEnvInfo() : null;
