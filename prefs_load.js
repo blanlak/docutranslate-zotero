@@ -198,6 +198,38 @@
                 testApi();
             });
         }
+        // 保存按钮：写入所有字段并给出明确反馈
+        const saveBtn = document.getElementById("dt-save");
+        if (saveBtn) {
+            let saveTimer = null;
+            saveBtn.addEventListener("click", function (e) {
+                e.preventDefault();
+                saveAll();
+                const apiKey = (getPref("apiKey", "") || "").trim();
+                const mineru = (getPref("mineruToken", "") || "").trim();
+                const svcExe = (getPref("serviceExe", "") || "").trim();
+                const missing = [];
+                if (!apiKey) missing.push("API Key");
+                if (!mineru) missing.push("MinerU Token");
+                if (!svcExe) missing.push("DocuTranslate 程序路径");
+
+                const out = document.getElementById("dt-save-result");
+                if (!out) return;
+                if (missing.length) {
+                    out.textContent = "✓ 已保存，但还缺：" + missing.join("、");
+                    out.style.color = "#b26a00";
+                } else {
+                    out.textContent = "✓ 已保存，配置已生效";
+                    out.style.color = "#1a7f37";
+                }
+                out.style.fontWeight = "600";
+                if (saveTimer) clearTimeout(saveTimer);
+                saveTimer = setTimeout(function () {
+                    if (out) out.textContent = "";
+                }, 6000);
+            });
+        }
+
         const probeBtn = document.getElementById("dt-probe");
         if (probeBtn) {
             probeBtn.addEventListener("click", function (e) {
