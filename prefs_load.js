@@ -11,7 +11,6 @@
         ["dt-baseUrl", "baseUrl", "string"],
         ["dt-modelId", "modelId", "string"],
         ["dt-toLang", "toLang", "string"],
-        ["dt-thinking", "thinking", "string"],
         ["dt-mineruToken", "mineruToken", "string"],
         ["dt-chunkSize", "chunkSize", "int"],
         ["dt-concurrent", "concurrent", "int"]
