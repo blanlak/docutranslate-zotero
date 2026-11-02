@@ -133,16 +133,24 @@ def ensure_service():
     workdir = SERVICE_CWD or str(pathlib.Path(SERVICE_EXE).parent)
     # CREATE_NEW_CONSOLE = 独立控制台；CREATE_BREAKAWAY_FROM_JOB = 脱离父作业对象
     proc = None
-    try:
-        proc = subprocess.Popen(args, cwd=workdir,
-                                creationflags=subprocess.CREATE_NEW_CONSOLE | 0x01000000)
-    except Exception:
+    # 顺序很关键：在受控作业对象里 CREATE_BREAKAWAY_FROM_JOB 必然返回 WinError 5，
+    # 因此先试普通独立控制台，失败再尝试脱离作业，最后退到无特殊标志。
+    launch_attempts = [
+        subprocess.CREATE_NEW_CONSOLE,
+        subprocess.CREATE_NEW_CONSOLE | 0x01000000,
+        0,
+    ]
+    last_err = None
+    for flags in launch_attempts:
         try:
-            proc = subprocess.Popen(args, cwd=workdir,
-                                    creationflags=subprocess.CREATE_NEW_CONSOLE)
+            proc = subprocess.Popen(args, cwd=workdir, creationflags=flags)
+            break
         except Exception as e:
-            setp(-1, "无法启动 DocuTranslate：{}".format(e))
-            return False
+            last_err = e
+            proc = None
+    if proc is None:
+        setp(-1, "无法启动 DocuTranslate：{}".format(last_err))
+        return False
 
     # 进程秒退通常意味着启动失败（被杀毒拦截、缺依赖、路径带特殊字符等）
     time.sleep(3)
