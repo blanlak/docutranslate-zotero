@@ -262,7 +262,8 @@ def main():
             pass
 
     # === 本机路径：配置优先，其次自动探测 ===
-    SERVICE = str(cfg.get("service_url") or SERVICE).rstrip("/")
+    # 服务固定在本机回环地址（本插件只对接本地 DocuTranslate）
+    SERVICE = "http://127.0.0.1:8010"
     SERVICE_EXE = str(cfg.get("service_exe") or "").strip()
     SERVICE_CWD = str(cfg.get("service_cwd") or "").strip()
     if not SERVICE_EXE:

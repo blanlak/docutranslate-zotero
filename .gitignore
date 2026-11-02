@@ -1,3 +1,7 @@
 __pycache__/
 *.pyc
 zotero_plugin_trace.log
+helper_b64.txt
+build_v2/
+dt_helper.exe
+DocuTranslate.xpi

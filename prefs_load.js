@@ -4,8 +4,6 @@
 (function () {
     const PREFIX = "extensions.zotero.docutranslate.";
     const FIELDS = [
-        ["dt-serviceUrl", "serviceUrl", "string"],
-        ["dt-pythonExe", "pythonExe", "string"],
         ["dt-serviceExe", "serviceExe", "string"],
         ["dt-serviceCwd", "serviceCwd", "string"],
         ["dt-edgePath", "edgePath", "string"],
@@ -65,7 +63,6 @@
                 return;
             }
             const map = [
-                ["dt-pythonExe", "pythonExe", info.pythonwExe],
                 ["dt-serviceExe", "serviceExe", info.serviceExe],
                 ["dt-serviceCwd", "serviceCwd", info.serviceCwd]
             ];
@@ -96,7 +93,7 @@
         const key = (getPref("apiKey", "") || "").trim();
         const base = (getPref("baseUrl", "") || "").trim().replace(/\/+$/, "");
         const model = (getPref("modelId", "") || "").trim();
-        const svc = (getPref("serviceUrl", "http://127.0.0.1:8010") || "").trim().replace(/\/+$/, "");
+        const svc = "http://127.0.0.1:8010";  // 仅本地服务
 
         if (!base) {
             setResult(false, "✗ 请先填写 API 地址");

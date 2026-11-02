@@ -127,6 +127,21 @@ function probeEnv(kind) {
             }
             for (const s of subs.slice(0, 20)) {
                 if (pathExistsSync(s + rel)) return s + rel;
+                // 三层：D://devtools//py//miniforge3//envs//docutranslate
+                let subs3 = [];
+                try {
+                    const d3 = Components.classes["@mozilla.org/file/local;1"]
+                        .createInstance(Components.interfaces.nsIFile);
+                    d3.initWithPath(s);
+                    const it3 = d3.directoryEntries;
+                    while (it3.hasMoreElements()) {
+                        const sub3 = it3.getNext().QueryInterface(Components.interfaces.nsIFile);
+                        if (sub3.isDirectory()) subs3.push(sub3.path);
+                    }
+                } catch (e3) { continue; }
+                for (const s3 of subs3.slice(0, 15)) {
+                    if (pathExistsSync(s3 + rel)) return s3 + rel;
+                }
             }
         }
     }
@@ -289,7 +304,6 @@ var Translator = {
                 chunk_size: parseInt(prefGet("chunkSize", "4000"), 10) || 4000,
                 concurrent: parseInt(prefGet("concurrent", "10"), 10) || 10,
                 // 运行环境（每次翻译时重新读取，改设置后立即生效）
-                service_url: prefGet("serviceUrl", "http://127.0.0.1:8010").replace(/\/+$/, ""),
                 service_exe: prefGet("serviceExe") || CONFIG.serviceExe,
                 service_cwd: prefGet("serviceCwd") || CONFIG.serviceCwd,
                 edge_path: prefGet("edgePath")
@@ -405,19 +419,25 @@ var Translator = {
 
             // 启动一次进程（唯一一次 nsIProcess 调用）
             try {
-                if (!CONFIG.pythonwExe || !fileExistsSync(CONFIG.pythonwExe)) {
-                    throw new Error("未找到 pythonw.exe。请到 Zotero 设置 → DocuTranslate 翻译 → " +
-                        "运行环境 中填写 Python 路径（如 …\\envs\\docutranslate\\pythonw.exe）");
+                let exePath = "";
+                let args = [];
+                if (CONFIG.helperExe && fileExistsSync(CONFIG.helperExe)) {
+                    // 首选：插件自带的单文件助手，无需 Python 环境
+                    exePath = CONFIG.helperExe;
+                    args = ["run", pdfPath, workDir, destPdf];
+                } else if (CONFIG.pythonwExe && fileExistsSync(CONFIG.pythonwExe) &&
+                           CONFIG.helperScript && fileExistsSync(CONFIG.helperScript)) {
+                    // 开发者兜底：python + .py
+                    exePath = CONFIG.pythonwExe;
+                    args = [CONFIG.helperScript, "run", pdfPath, workDir, destPdf];
+                } else {
+                    throw new Error("助手组件缺失：请重新安装插件（exe 未解包成功）");
                 }
-                if (!CONFIG.helperScript || !fileExistsSync(CONFIG.helperScript)) {
-                    throw new Error("助手脚本缺失，请重新安装插件（未解包成功）");
-                }
-                const file = makeNsIFile(CONFIG.pythonwExe);
+                const file = makeNsIFile(exePath);
                 const proc = Components.classes["@mozilla.org/process/util;1"]
                     .createInstance(Components.interfaces.nsIProcess);
                 proc.init(file);
-                const args = [CONFIG.helperScript, "run", pdfPath, workDir, destPdf];
-                log("启动 helper: " + args.join(" "));
+                log("启动 helper: " + exePath);
                 proc.runwAsync(args, args.length, observer);
             } catch (e) {
                 log("启动 helper 异常: " + (e.stack || e));
@@ -543,7 +563,7 @@ function removeMenu(win) {
 }
 
 // 运行时初始化：解包助手脚本到用户配置目录，解析并探测所有依赖路径
-async function ensureRuntime(rootURI) {
+async function ensureRuntime(rootURI, version) {
     try {
         let profDir = "";
         try {
@@ -555,30 +575,52 @@ async function ensureRuntime(rootURI) {
         TRACE_FILE = RUNTIME_DIR + "\\trace.log";
     } catch (e) {}
 
-    // 1) 每次启动从插件包解出助手脚本（保证与插件版本一致，且不依赖用户目录布局）
+    // 1) 解包助手：优先单文件 exe（无需 Python 环境），按插件版本判断是否需要更新
     try {
-        const helperPath = RUNTIME_DIR + "\\translate_helper.py";
-        const content = Zotero.File.getContentsFromURL(rootURI + "translate_helper.py");
-        if (content && content.length > 500) {
-            await IOUtils.writeUTF8(helperPath, content);
-            CONFIG.helperScript = helperPath;
+        const exePath = RUNTIME_DIR + "\\dt_helper.exe";
+        const verFile = RUNTIME_DIR + "\\helper.version";
+        let curVer = "";
+        try { curVer = (await IOUtils.readUTF8(verFile)).trim(); } catch (e) {}
+        if (curVer !== version || !pathExistsSync(exePath)) {
+            const b64 = Zotero.File.getContentsFromURL(rootURI + "helper_b64.txt");
+            if (b64 && b64.length > 1000000) {
+                const bin = atob(b64.replace(/\s+/g, ""));
+                const u8 = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+                await IOUtils.write(exePath, u8);
+                await IOUtils.writeUTF8(verFile, version);
+                log("已解包助手 exe: " + (u8.length / 1048576).toFixed(1) + " MB");
+            }
         }
+        if (pathExistsSync(exePath)) CONFIG.helperExe = exePath;
     } catch (e) {
-        log("解包助手脚本失败: " + e);
+        log("解包助手 exe 失败: " + e);
     }
 
-    // 2) 路径：设置面板 > 自动探测
+    // 兜底：开发模式下若没有 exe，解包 .py 并依赖本机 Python
+    if (!CONFIG.helperExe) {
+        try {
+            const helperPath = RUNTIME_DIR + "\\translate_helper.py";
+            const content = Zotero.File.getContentsFromURL(rootURI + "translate_helper.py");
+            if (content && content.length > 500) {
+                await IOUtils.writeUTF8(helperPath, content);
+                CONFIG.helperScript = helperPath;
+            }
+        } catch (e) {
+            log("解包助手脚本失败: " + e);
+        }
+    }
+
+    // 2) 路径：设置面板 > 自动探测（只保留 DocuTranslate 本体与可选的 Edge）
     CONFIG.pythonwExe = prefGet("pythonExe") || probeEnv("pythonw");
     CONFIG.serviceExe = prefGet("serviceExe") || probeEnv("docutranslate");
     CONFIG.serviceCwd = prefGet("serviceCwd");
-    CONFIG.serviceUrl = prefGet("serviceUrl", "http://127.0.0.1:8010").replace(/\/+$/, "");
     const edgePref = prefGet("edgePath");
     if (edgePref) CONFIG.edgeCandidates = [edgePref];
 
-    log("运行环境: helper=" + CONFIG.helperScript +
-        " | python=" + (CONFIG.pythonwExe || "(未找到)") +
-        " | service=" + CONFIG.serviceUrl +
-        " | serviceExe=" + (CONFIG.serviceExe || "(未找到)"));
+    log("运行环境: " + (CONFIG.helperExe ? "内置 exe" : ("python 兜底 " + CONFIG.helperScript)) +
+        " | serviceExe=" + (CONFIG.serviceExe || "(未找到)") +
+        " | serviceCwd=" + (CONFIG.serviceCwd || "(默认)"));
 }
 
 async function startup({ id, version, rootURI }, reason) {
@@ -586,7 +628,7 @@ async function startup({ id, version, rootURI }, reason) {
         await Zotero.initializationPromise;
         Zotero.DocuTranslate = Translator;
         // 运行时初始化（解包助手 + 解析路径）
-        await ensureRuntime(rootURI);
+        await ensureRuntime(rootURI, version);
         // 迁移旧模型配置到 sensenova-6.8-flash-lite（用户明确要求切换）
         try {
             const cur = Zotero.Prefs.get("extensions.zotero.docutranslate.modelId", true);

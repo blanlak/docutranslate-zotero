@@ -10,8 +10,6 @@ pref("extensions.zotero.docutranslate.chunkSize", 4000);
 pref("extensions.zotero.docutranslate.concurrent", 10);
 
 // 运行环境（留空 = 自动探测）
-pref("extensions.zotero.docutranslate.serviceUrl", "http://127.0.0.1:8010");
-pref("extensions.zotero.docutranslate.pythonExe", "");
 pref("extensions.zotero.docutranslate.serviceExe", "");
 pref("extensions.zotero.docutranslate.serviceCwd", "");
 pref("extensions.zotero.docutranslate.edgePath", "");

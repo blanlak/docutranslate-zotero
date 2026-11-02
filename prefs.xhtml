@@ -31,18 +31,10 @@
 
     <div class="dt-section">
       <h2>运行环境</h2>
-      <p>首次使用需填写本机 DocuTranslate 安装位置；留空时插件会尝试自动探测。</p>
+      <p>插件已内置翻译助手（无需 Python）。只需指向本机 DocuTranslate 本体；留空会尝试自动探测。</p>
       <div class="dt-row" style="margin-top: 0;">
         <button id="dt-probe" type="button" class="dt-btn">自动探测本机环境</button>
         <span id="dt-probe-result" class="dt-result"></span>
-      </div>
-      <div class="dt-field">
-        <label for="dt-serviceUrl">服务地址（本机或内网/云端）</label>
-        <input id="dt-serviceUrl" placeholder="http://127.0.0.1:8010"/>
-      </div>
-      <div class="dt-field">
-        <label for="dt-pythonExe">Python 路径（pythonw.exe）</label>
-        <input id="dt-pythonExe" placeholder="例如 C:\...\envs\docutranslate\pythonw.exe"/>
       </div>
       <div class="dt-field">
         <label for="dt-serviceExe">DocuTranslate 程序路径（docutranslate.exe）</label>
@@ -54,8 +46,8 @@
         <div class="dt-note">服务未运行时，插件会用上面的程序路径自动启动它。</div>
       </div>
       <div class="dt-field">
-        <label for="dt-edgePath">Edge 路径（用于把译文打印成 PDF）</label>
-        <input id="dt-edgePath" placeholder="留空自动探测"/>
+        <label for="dt-edgePath">浏览器路径（用于把译文打印成 PDF，Edge/Chrome 均可）</label>
+        <input id="dt-edgePath" placeholder="留空自动探测 Edge 或 Chrome"/>
       </div>
     </div>
 
