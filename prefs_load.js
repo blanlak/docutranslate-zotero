@@ -205,6 +205,22 @@
                 probe();
             });
         }
+        // 注册/获取 Key 的外链（用系统默认浏览器打开）
+        const links = [
+            ["dt-link-sensenova", "https://platform.sensenova.cn/"],
+            ["dt-link-mineru", "https://mineru.net/apiManage/token"]
+        ];
+        for (const [id, url] of links) {
+            const btn = document.getElementById(id);
+            if (!btn) continue;
+            btn.addEventListener("click", function (e) {
+                e.preventDefault();
+                try {
+                    if (Zotero.launchURL) Zotero.launchURL(url);
+                    else Services.io; // 兜底不处理
+                } catch (err) {}
+            });
+        }
     }
 
     bind();
