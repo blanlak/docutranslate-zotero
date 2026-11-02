@@ -232,8 +232,13 @@
 
                 const out = document.getElementById("dt-save-result");
                 if (!out) return;
+                const hasCn = /[^\x00-\x7F]/.test(svcExe) ||
+                              /[^\x00-\x7F]/.test((getPref("serviceCwd", "") || ""));
                 if (missing.length) {
                     out.textContent = "✓ 已保存，但还缺：" + missing.join("、");
+                    out.style.color = "#b26a00";
+                } else if (hasCn) {
+                    out.textContent = "✓ 已保存（路径含中文，已自动兼容；建议移到英文目录更稳妥）";
                     out.style.color = "#b26a00";
                 } else {
                     out.textContent = "✓ 已保存，配置已生效";

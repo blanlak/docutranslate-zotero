@@ -106,6 +106,72 @@ def _port_in_use(port=8010):
             pass
 
 
+def _has_non_ascii(text):
+    try:
+        str(text).encode("ascii")
+        return False
+    except (UnicodeEncodeError, AttributeError):
+        return True
+
+
+def _short_path(p):
+    """把含中文的路径转成 Windows 8.3 短路径（纯 ASCII）。
+    便携版程序在中文目录下启动时，CreateProcess / PyInstaller 可能失败，
+    用短路径可绕过；无 8.3 名称或调用失败时返回原路径。"""
+    if not p or not _has_non_ascii(p):
+        return p
+    try:
+        import ctypes
+        from ctypes import wintypes
+        fn = ctypes.windll.kernel32.GetShortPathNameW
+        fn.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+        fn.restype = wintypes.DWORD
+        buf = ctypes.create_unicode_buffer(32768)
+        n = fn(str(p), buf, 32768)
+        if n and n < 32768 and buf.value:
+            return buf.value
+    except Exception:
+        pass
+    return p
+
+
+def _prepare_exe_path(exe_path):
+    """处理含中文的程序路径：
+    1) 能转 8.3 短路径就转（纯 ASCII）
+    2) 转不了就把程序复制到纯英文临时目录再启动（仅对单文件便携版有效）
+    返回可安全启动的路径。"""
+    if not exe_path or not _has_non_ascii(exe_path):
+        return exe_path
+
+    short = _short_path(exe_path)
+    if short != exe_path and not _has_non_ascii(short):
+        setp(4, "路径含中文，已转换为短路径启动")
+        return short
+
+    # 短路径不可用（系统禁用了 8.3 名称）→ 复制到英文临时目录
+    try:
+        import shutil
+        import tempfile
+        src = pathlib.Path(exe_path)
+        if not src.is_file():
+            return exe_path
+        dst_dir = pathlib.Path(tempfile.gettempdir()) / "DocuTranslatePortable"
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        dst = dst_dir / "DocuTranslate-portable.exe"
+        need_copy = True
+        if dst.exists():
+            try:
+                need_copy = dst.stat().st_size != src.stat().st_size
+            except OSError:
+                need_copy = True
+        if need_copy:
+            setp(5, "路径含中文，正在准备可执行副本（首次约需几秒）…")
+            shutil.copy2(str(src), str(dst))
+        return str(dst)
+    except Exception:
+        return exe_path
+
+
 def ensure_service():
     """检查服务；未启动则拉起并等待就绪。返回 True/False"""
     if service_up():
@@ -142,6 +208,13 @@ def ensure_service():
     if not os.path.isdir(workdir):
         workdir = None  # 最后兜底：继承当前进程目录
 
+    # 中文路径兼容：先试 8.3 短路径，不行就复制到英文临时目录
+    prepared = _prepare_exe_path(exe_path)
+    if prepared != exe_path:
+        exe_path = prepared
+        exe_dir = str(pathlib.Path(exe_path).parent)
+        workdir = exe_dir
+
     # pip/conda 版 CLI 需要 -i 启动 Web 界面；便携版不解析参数，传了也无害
     args = [exe_path, "-i"]
     # CREATE_NEW_CONSOLE = 独立控制台；CREATE_BREAKAWAY_FROM_JOB = 脱离父作业对象
@@ -162,7 +235,10 @@ def ensure_service():
             last_err = e
             proc = None
     if proc is None:
-        setp(-1, "无法启动 DocuTranslate：{}".format(last_err))
+        hint = ""
+        if _has_non_ascii(str(SERVICE_EXE)) or _has_non_ascii(str(SERVICE_CWD or "")):
+            hint = "。路径中包含中文，建议把 DocuTranslate 移到纯英文目录（如 D:////DocuTranslate）后重试"
+        setp(-1, "无法启动 DocuTranslate：{}{}".format(last_err, hint))
         return False
 
     # 进程秒退通常意味着启动失败（被杀毒拦截、缺依赖、路径带特殊字符等）
