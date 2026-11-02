@@ -118,8 +118,10 @@ def ensure_service():
         setp(-1, "未配置 DocuTranslate 程序路径：请到 Zotero 设置 → DocuTranslate 翻译 → "
                  "运行环境 中填写 docutranslate.exe（或便携版 exe）的完整路径")
         return False
-    if not pathlib.Path(SERVICE_EXE).is_file():
-        setp(-1, "找不到 DocuTranslate 程序：{}".format(SERVICE_EXE))
+    # 用户可能粘贴带引号的路径，校验前先清理
+    exe_path = str(SERVICE_EXE).strip().strip('"').strip("'")
+    if not pathlib.Path(exe_path).is_file():
+        setp(-1, "找不到 DocuTranslate 程序：{}".format(exe_path))
         return False
 
     # 端口被别的程序占用时，服务会自动改用其它端口，插件固定连 8010 必然失败
@@ -128,9 +130,20 @@ def ensure_service():
                  "请先关闭占用 8010 的程序后重试。")
         return False
 
+    # 路径清理与校验：用户可能把「文件路径」当工作目录填、或粘贴带引号的路径，
+    # 直接传给 Popen(cwd=...) 会抛 WinError 267（目录名称无效）
+    exe_dir = str(pathlib.Path(exe_path).parent)
+    workdir = str(SERVICE_CWD or "").strip().strip('"').strip("'")
+    if workdir and not os.path.isdir(workdir):
+        setp(4, "工作目录无效，已自动改用程序所在目录：{}".format(exe_dir))
+        workdir = exe_dir
+    if not workdir:
+        workdir = exe_dir
+    if not os.path.isdir(workdir):
+        workdir = None  # 最后兜底：继承当前进程目录
+
     # pip/conda 版 CLI 需要 -i 启动 Web 界面；便携版不解析参数，传了也无害
-    args = [SERVICE_EXE, "-i"]
-    workdir = SERVICE_CWD or str(pathlib.Path(SERVICE_EXE).parent)
+    args = [exe_path, "-i"]
     # CREATE_NEW_CONSOLE = 独立控制台；CREATE_BREAKAWAY_FROM_JOB = 脱离父作业对象
     proc = None
     # 顺序很关键：在受控作业对象里 CREATE_BREAKAWAY_FROM_JOB 必然返回 WinError 5，
