@@ -68,8 +68,8 @@ PAYLOAD = {
     "model_id": "sensenova-6.8-flash-lite",
     "to_lang": "中文",
     "thinking": "disable",
-    "chunk_size": 4000,
-    "concurrent": 2,
+    "chunk_size": 3000,
+    "concurrent": 1,
     "temperature": 0.3,
     "timeout": 600,
     "retry": 5,
@@ -308,6 +308,10 @@ def translate(pdf, dest_pdf=None):
             time.sleep(3)
     resp.raise_for_status()
     task_id = resp.json()["task_id"]
+    try:
+        (work / "service_task_id.txt").write_text(str(task_id), encoding="utf-8")
+    except Exception:
+        pass
 
     setp(12, "解析与翻译中")
     last = ""
@@ -338,6 +342,14 @@ def translate(pdf, dest_pdf=None):
     setp(95, "下载译文")
     # 必须校验状态码：服务端出错时返回的是 JSON 错误体（如"任务不支持下载 html
     # 类型的文件，或文件已丢失"），若当成正文保存，最终会生成一份只含 JSON 的 PDF
+    # 留存服务端日志：分片失败会被记录在这里（429 / 超时 / 输出截断）
+    try:
+        lg = client.get(SERVICE + "/service/logs/" + task_id)
+        if lg.status_code == 200:
+            (work / "service_log.json").write_text(lg.text, encoding="utf-8")
+    except Exception:
+        pass
+
     try:
         dresp = client.get(SERVICE + "/service/download/" + task_id + "/html")
     except Exception as e:

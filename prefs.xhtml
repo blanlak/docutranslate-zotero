@@ -93,11 +93,12 @@
       <div class="dt-field">
         <label for="dt-chunkSize">分块大小</label>
         <input id="dt-chunkSize" type="number"/>
+        <div class="dt-note">建议 3000。调小可减少单次请求长度、降低分片失败（漏译）概率，代价是分片变多。</div>
       </div>
       <div class="dt-field">
         <label for="dt-concurrent">并发数</label>
         <input id="dt-concurrent" type="number" min="1" max="3" step="1"/>
-        <div class="dt-note">建议 2。SenseNova 限制 60 RPM / 128K TPM，并发超过 3 容易触发 429 限流（每模型 1500 次 / 5 小时）。</div>
+        <div class="dt-note">建议 1。并发越高越容易触发限流（60 RPM / 128K TPM，每模型 1500 次 / 5 小时）；漏译多时先降并发再加分块。</div>
       </div>
     </div>
 
