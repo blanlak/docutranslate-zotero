@@ -266,26 +266,40 @@ def ensure_service():
 
 
 def _detect_partial_translation(html_text):
-    """粗略检测"部分段落没翻译"。
-    DocuTranslate 旧版（<=1.7.9）在分片请求失败时会直接把原文回填且不报错，
-    表现为译文里混着成段英文。这里按段落统计含中文的比例。
-    返回 (总段落数, 已翻译段落数)；不明显时返回 None。"""
+    """粗略检测"正文段落没翻译"。
+    旧版 DocuTranslate（<=1.7.9）分片失败会静默回填原文，表现为正文混着成段英文。
+    只统计"像正文"的段落：排除参考文献、作者/邮箱、公式、纯符号行。
+    返回 (可判定段落数, 已翻译数)；样本不足时返回 None。"""
     import re
     try:
         blocks = re.findall(r"<(p|td|li|h[1-6])[^>]*>(.*?)</\1>", html_text, re.S)
     except Exception:
         return None
+
     total = 0
     zh = 0
     for _tag, raw in blocks:
         text = re.sub(r"<[^>]+>", " ", raw)
         text = re.sub(r"\s+", " ", text).strip()
-        if len(text) < 40:      # 太短（图注、表头、页码）不计入
+        if len(text) < 60:                      # 短行：标题/图注/页码
+            continue
+        if text.startswith("["):                 # 参考文献条目
+            continue
+        if "@" in text:                          # 邮箱
+            continue
+        if re.match(r"^[\d\s.,;:()\-–—%×/]+$", text):   # 纯数字/符号
+            continue
+        if re.search(r"\\\(|\\\[|\\begin\{", text):        # LaTeX 公式
+            continue
+        if len(re.findall(r"[A-Za-z]{3,}", text)) < 8:   # 英文实词太少的行
+            continue
+        if re.search(r"^(Fig|Figure|Table|Algorithm)\.?\s*\d", text):  # 图表标题
             continue
         total += 1
         if re.search(r"[\u4e00-\u9fff]", text):
             zh += 1
-    if total >= 8 and zh / total < 0.75:
+
+    if total >= 6 and zh / total < 0.75:
         return total, zh
     return None
 
@@ -449,6 +463,21 @@ def main():
         try:
             cfg = json.loads(cfgp.read_text(encoding="utf-8"))
             PAYLOAD.update({k: v for k, v in cfg.items() if v not in (None, "")})
+
+            # 部分中转平台（如 TokenRhythm）要求把关闭思考写成对象格式，
+            # DocuTranslate 的 thinking 是字符串，透传会被忽略 → 改用 extra_body 合并进请求体
+            base = str(PAYLOAD.get("base_url") or "").lower()
+            if "tokenrhythm" in base:
+                import json as _json
+                extra = {}
+                try:
+                    extra = _json.loads(PAYLOAD.get("extra_body") or "{}")
+                except Exception:
+                    extra = {}
+                extra["thinking"] = {"type": "disabled"}
+                PAYLOAD["extra_body"] = _json.dumps(extra, ensure_ascii=False)
+                logger_extra = "已对 TokenRhythm 关闭思考"
+                print(logger_extra, flush=True)
         except Exception:
             pass
 
