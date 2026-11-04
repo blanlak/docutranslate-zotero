@@ -19,6 +19,7 @@ import httpx
 # 所有本机相关路径均不写死：优先取 config.json（插件设置面板填写），
 # 其次自动探测常见安装位置，最后才报错提示用户去设置里填写。
 SERVICE = "http://127.0.0.1:8010"
+PARTIAL_INFO = None  # 部分未翻译检测结果
 SERVICE_EXE = ""   # 由 config.json 的 service_exe 提供，或自动探测
 SERVICE_CWD = ""   # 由 config.json 的 service_cwd 提供
 EDGE_CANDIDATES = [
@@ -71,7 +72,7 @@ PAYLOAD = {
     "concurrent": 2,
     "temperature": 0.3,
     "timeout": 600,
-    "retry": 3,
+    "retry": 5,
     "mineru_token": "",
 }
 
@@ -264,6 +265,31 @@ def ensure_service():
     return False
 
 
+def _detect_partial_translation(html_text):
+    """粗略检测"部分段落没翻译"。
+    DocuTranslate 旧版（<=1.7.9）在分片请求失败时会直接把原文回填且不报错，
+    表现为译文里混着成段英文。这里按段落统计含中文的比例。
+    返回 (总段落数, 已翻译段落数)；不明显时返回 None。"""
+    import re
+    try:
+        blocks = re.findall(r"<(p|td|li|h[1-6])[^>]*>(.*?)</\1>", html_text, re.S)
+    except Exception:
+        return None
+    total = 0
+    zh = 0
+    for _tag, raw in blocks:
+        text = re.sub(r"<[^>]+>", " ", raw)
+        text = re.sub(r"\s+", " ", text).strip()
+        if len(text) < 40:      # 太短（图注、表头、页码）不计入
+            continue
+        total += 1
+        if re.search(r"[\u4e00-\u9fff]", text):
+            zh += 1
+    if total >= 8 and zh / total < 0.75:
+        return total, zh
+    return None
+
+
 def translate(pdf, dest_pdf=None):
     setp(10, "上传 PDF")
     resp = None
@@ -329,6 +355,13 @@ def translate(pdf, dest_pdf=None):
     html_path = work / "translated.html"
     html_path.write_text(html, encoding="utf-8")
 
+    # 部分段落未翻译检测（旧版 DocuTranslate 分片失败会静默回填原文）
+    global PARTIAL_INFO
+    try:
+        PARTIAL_INFO = _detect_partial_translation(html)
+    except Exception:
+        PARTIAL_INFO = None
+
     try:
         client.post(SERVICE + "/service/release/" + task_id)
     except Exception:
@@ -376,7 +409,12 @@ def translate(pdf, dest_pdf=None):
             setp(-1, "复制译文到目标目录失败: {}".format(e))
             return False
 
-    setp(100, "完成")
+    if PARTIAL_INFO:
+        total, zh = PARTIAL_INFO
+        setp(100, "完成，但有 {} / {} 段未翻译（建议升级 DocuTranslate 到 1.7.10 或把分块降小）"
+             .format(total - zh, total))
+    else:
+        setp(100, "完成")
     return True
 
 
