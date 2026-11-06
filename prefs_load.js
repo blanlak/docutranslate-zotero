@@ -15,6 +15,75 @@
         ["dt-chunkSize", "chunkSize", "int"],
         ["dt-concurrent", "concurrent", "int"]
     ];
+
+    // 接口平台快捷选择（地址取自 DocuTranslate 1.7.11 自带列表）
+    var PLATFORMS = [
+        ["302.AI", "https://api.302.ai/v1"],
+        ["MiniMax", "https://api.minimaxi.com/v1"],
+        ["OpenAI", "https://api.openai.com/v1"],
+        ["Gemini", "https://generativelanguage.googleapis.com/v1beta/openai/"],
+        ["DeepSeek", "https://api.deepseek.com/v1"],
+        ["MiMo", "https://api.xiaomimimo.com/v1"],
+        ["阿里云百炼", "https://dashscope.aliyuncs.com/compatible-mode/v1"],
+        ["火山引擎", "https://ark.cn-beijing.volces.com/api/v3"],
+        ["硅基流动", "https://api.siliconflow.cn/v1"],
+        ["智谱AI", "https://open.bigmodel.cn/api/paas/v4"],
+        ["DMXAPI_CN", "https://www.dmxapi.cn/v1"],
+        ["DMXAPI_GLOBAL", "https://www.dmxapi.com/v1"],
+        ["聚光AI", "https://ai.juguang.chat/v1"],
+        ["OpenRouter", "https://openrouter.ai/api/v1"],
+        ["LM Studio", "http://127.0.0.1:1234/v1"],
+        ["Ollama", "http://127.0.0.1:11434/v1"]
+    ];
+    var CUSTOM = "__custom__";
+
+    function setupPlatformSelect() {
+        var sel = document.getElementById("dt-platform");
+        var urlInput = document.getElementById("dt-baseUrl");
+        if (!sel || !urlInput) return;
+
+        sel.innerHTML = "";
+        var optCustom = document.createElement("option");
+        optCustom.value = CUSTOM;
+        optCustom.textContent = "自定义接口";
+        sel.appendChild(optCustom);
+        PLATFORMS.forEach(function (pair) {
+            var o = document.createElement("option");
+            o.value = pair[1];
+            o.textContent = pair[0];
+            sel.appendChild(o);
+        });
+
+        // 根据当前地址反查平台
+        var cur = (urlInput.value || "").trim().toLowerCase().replace(/\/+$/, "");
+        var matched = false;
+        for (var i = 0; i < PLATFORMS.length; i++) {
+            var u = PLATFORMS[i][1].toLowerCase().replace(/\/+$/, "");
+            if (u === cur) { sel.value = PLATFORMS[i][1]; matched = true; break; }
+        }
+        if (!matched) sel.value = CUSTOM;
+
+        sel.addEventListener("change", function () {
+            if (sel.value === CUSTOM) {
+                urlInput.focus();
+                return;
+            }
+            urlInput.value = sel.value;
+            try { Zotero.Prefs.set(PREFIX + "baseUrl", sel.value, true); } catch (e) {}
+        });
+
+        urlInput.addEventListener("input", function () {
+            var v = (urlInput.value || "").trim().toLowerCase().replace(/\/+$/, "");
+            var hit = CUSTOM;
+            for (var i = 0; i < PLATFORMS.length; i++) {
+                if (PLATFORMS[i][1].toLowerCase().replace(/\/+$/, "") === v) {
+                    hit = PLATFORMS[i][1];
+                    break;
+                }
+            }
+            sel.value = hit;
+        });
+    }
     let tries = 0;
 
     function saveField(id, name, type) {
@@ -26,7 +95,7 @@
                 val = parseInt(val, 10) || 0;
                 // 并发数上限 3（SenseNova 60 RPM / 128K TPM）
                 if (name === "concurrent") {
-                    val = Math.max(1, Math.min(val, 3));
+                    val = Math.max(1, Math.min(val, 32));
                     if (String(val) !== input.value) input.value = val;
                 }
             }
@@ -261,8 +330,9 @@
         }
         // 注册/获取 Key 的外链（用系统默认浏览器打开）
         const links = [
-            ["dt-link-sensenova", "https://platform.sensenova.cn/"],
-            ["dt-link-mineru", "https://mineru.net/apiManage/token"]
+            ["dt-link-mineru", "https://mineru.net/apiManage/token"],
+            ["dt-download",
+             "https://github.com/blanlak/docutranslate-zotero/releases/download/v2.1.26/DocuTranslate-1.7.11-win.exe"]
         ];
         for (const [id, url] of links) {
             const btn = document.getElementById(id);
@@ -275,6 +345,9 @@
                 } catch (err) {}
             });
         }
+
+        // 字段已回填，最后再初始化平台下拉（需要读取当前 API 地址做反查）
+        setupPlatformSelect();
     }
 
     bind();

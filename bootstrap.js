@@ -35,9 +35,11 @@ var CONFIG = {
 var RUNTIME_DIR = "";   // <profile>/docutranslate
 var TRACE_FILE = "";    // <profile>/docutranslate/trace.log
 var PLUGIN_ROOT_URI = "";
+var PLUGIN_VERSION = "";   // 由 startup 传入，用于判断缓存助手是否为当前版本
 
-// 内置助手：优先用已缓存的，缺失时从 Release 下载（20MB 左右，仅首次）
+// 内置助手：优先用已缓存的，缺失或版本过期时从 Release 下载（20MB 左右）
 var HELPER_EXE_NAME = "dt_helper.exe";
+var HELPER_STAMP_NAME = "dt_helper.ver";   // 记录缓存 exe 对应的插件版本
 var HELPER_MIN_SIZE = 15 * 1024 * 1024;
 var HELPER_DOWNLOAD_URL =
     "https://github.com/blanlak/docutranslate-zotero/releases/latest/download/dt_helper.exe";
@@ -51,11 +53,31 @@ async function helperExeReady() {
     return "";
 }
 
-// 确保助手 exe 就位：缓存 -> 包内 base64（分块解码）-> Release 下载
+// 缓存 exe 是否对应当前插件版本（老版本遗留的 exe 不能继续用，
+// 否则插件升级后行为仍是旧的，比如 404 空轮询）
+async function helperStampMatches() {
+    if (!PLUGIN_VERSION) return true;
+    try {
+        const s = await IOUtils.readUTF8(RUNTIME_DIR + "\\" + HELPER_STAMP_NAME);
+        return String(s).trim() === PLUGIN_VERSION;
+    } catch (e) {
+        return false;
+    }
+}
+
+async function writeHelperStamp() {
+    try {
+        await IOUtils.writeUTF8(RUNTIME_DIR + "\\" + HELPER_STAMP_NAME, PLUGIN_VERSION || "0");
+    } catch (e) {}
+}
+
+// 确保助手 exe 就位：缓存(同版本) -> 包内 base64（分块解码）-> Release 下载
+// 版本不匹配时尝试刷新；刷新失败则退回旧 exe，保证离线也能继续翻译
 async function ensureHelperExe(onStatus) {
     let p = await helperExeReady();
-    if (p) { CONFIG.helperExe = p; return p; }
+    if (p && await helperStampMatches()) { CONFIG.helperExe = p; return p; }
 
+    const stale = p;   // 旧版缓存，刷新失败时兜底
     const exePath = RUNTIME_DIR + "\\" + HELPER_EXE_NAME;
 
     // 包内 base64（兼容旧包；分块解码，避免单次 atob 超长字符串失败）
@@ -74,7 +96,12 @@ async function ensureHelperExe(onStatus) {
             }
             await IOUtils.write(exePath, out.subarray(0, offset));
             p = await helperExeReady();
-            if (p) { CONFIG.helperExe = p; log("助手已从包内解出: " + (offset / 1048576).toFixed(1) + " MB"); return p; }
+            if (p) {
+                await writeHelperStamp();
+                CONFIG.helperExe = p;
+                log("助手已从包内解出: " + (offset / 1048576).toFixed(1) + " MB");
+                return p;
+            }
         }
     } catch (e) {
         log("包内解包失败: " + e);
@@ -82,20 +109,32 @@ async function ensureHelperExe(onStatus) {
 
     // 从 Release 下载
     try {
-        if (onStatus) onStatus("正在下载翻译助手（首次约 20MB，请稍候）…");
+        if (onStatus) onStatus("正在更新翻译助手（约 20MB，请稍候）…");
         const resp = await fetch(HELPER_DOWNLOAD_URL);
         if (resp.ok) {
             const buf = await resp.arrayBuffer();
             if (buf.byteLength > HELPER_MIN_SIZE) {
                 await IOUtils.write(exePath, new Uint8Array(buf));
                 p = await helperExeReady();
-                if (p) { CONFIG.helperExe = p; log("助手已下载: " + (buf.byteLength / 1048576).toFixed(1) + " MB"); return p; }
+                if (p) {
+                    await writeHelperStamp();
+                    CONFIG.helperExe = p;
+                    log("助手已下载: " + (buf.byteLength / 1048576).toFixed(1) + " MB");
+                    return p;
+                }
             }
         } else {
             log("下载助手失败 HTTP " + resp.status);
         }
     } catch (e) {
         log("下载助手异常: " + e);
+    }
+
+    // 刷新失败：继续用旧版，避免离线时完全无法翻译
+    if (stale) {
+        log("助手刷新失败，继续使用旧版缓存");
+        CONFIG.helperExe = stale;
+        return stale;
     }
     return "";
 }
@@ -304,6 +343,21 @@ function probePortableExe() {
         if (hit) return hit;
     }
 
+    // 2) 各盘根下名字像 docutranslate 的目录（用户按建议放 D://DocuTranslate 这类位置）
+    for (const d of ["C:", "D:", "E:", "F:"]) {
+        for (const sub of listEntries(d + "\\")) {
+            let isDir = false, name = "";
+            try {
+                isDir = sub.isDirectory();
+                name = sub.leafName;
+            } catch (e) { continue; }
+            if (!isDir) continue;
+            if (name.toLowerCase().indexOf("docutranslate") < 0) continue;
+            const hit = findPortableInDir(sub.path);
+            if (hit) return hit;
+        }
+    }
+
     // 2) 用户目录深层扫描（桌面/下载/文档 下 4 层）
     try {
         const home = Services.dirsvc.get("Home", Components.interfaces.nsIFile).path;
@@ -359,14 +413,38 @@ function probeServiceCwd() {
     return "";
 }
 
-// 探测可用于 HTML→PDF 的浏览器（Edge 优先，其次 Chrome）
+// 探测可用于 HTML→PDF 的浏览器（Chromium 内核，Edge 优先）
 function probeEdgePath() {
-    const cands = [
-        "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
-        "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
-        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-        "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
-    ];
+    const cands = [];
+    let pf = "C:////Program Files";
+    let pf86 = "C:////Program Files (x86)";
+    let local = "";
+    try { pf = Services.dirsvc.get("ProgramFiles", Components.interfaces.nsIFile).path; } catch (e) {}
+    try { pf86 = Services.dirsvc.get("ProgramFilesX86", Components.interfaces.nsIFile).path; } catch (e) {}
+    try { local = Services.dirsvc.get("LocalAppData", Components.interfaces.nsIFile).path; } catch (e) {}
+
+    const add = (base, rel) => { if (base) cands.push(base + "\\" + rel); };
+    add(pf86, "Microsoft\\Edge\\Application\\msedge.exe");
+    add(pf, "Microsoft\\Edge\\Application\\msedge.exe");
+    add(local, "Microsoft\\Edge\\Application\\msedge.exe");
+    add(pf, "Google\\Chrome\\Application\\chrome.exe");
+    add(pf86, "Google\\Chrome\\Application\\chrome.exe");
+    add(local, "Google\\Chrome\\Application\\chrome.exe");
+    add(pf, "BraveSoftware\\Brave-Browser\\Application\\brave.exe");
+    add(pf86, "BraveSoftware\\Brave-Browser\\Application\\brave.exe");
+    add(local, "BraveSoftware\\Brave-Browser\\Application\\brave.exe");
+    add(local, "Vivaldi\\Application\\vivaldi.exe");
+    add(pf, "Vivaldi\\Application\\vivaldi.exe");
+    add(local, "Programs\\Opera\\opera.exe");
+    add(pf, "Opera\\opera.exe");
+    add(local, "Chromium\\Application\\chrome.exe");
+    add(pf, "Chromium\\Application\\chrome.exe");
+    add(pf86, "360\\360se6\\Application\\360se.exe");
+    add(pf86, "360Chrome\\Chrome\\Application\\360chrome.exe");
+    add(local, "360Chrome\\Chrome\\Application\\360chrome.exe");
+    add(pf, "Tencent\\QQBrowser\\QQBrowser.exe");
+    add(pf, "SogouExplorer\\SogouExplorer.exe");
+
     for (const c of cands) {
         if (pathExistsSync(c)) return c;
     }
@@ -752,8 +830,10 @@ var Translator = {
     // 供设置面板“自动探测”调用：返回探测到的本机路径
     probeEnvInfo() {
         try {
-            const exe = CONFIG.serviceExe || probeEnv("docutranslate");
-            let cwd = CONFIG.serviceCwd || probeServiceCwd();
+            // 按钮语义是「重新探测」：先真扫盘，扫不到才退回已保存的值
+            const probed = probeEnv("docutranslate");
+            const exe = probed || CONFIG.serviceExe || "";
+            let cwd = probeServiceCwd() || "";
             // 便携版没有"项目目录"概念，退回 exe 所在目录（仅用于显示/启动上下文）
             if (!cwd && exe) {
                 const i = exe.lastIndexOf("\\");
@@ -816,12 +896,15 @@ async function ensureRuntime(rootURI, version) {
         TRACE_FILE = RUNTIME_DIR + "\\trace.log";
     } catch (e) {}
 
-    // 1) 助手 exe：已缓存就直接用；缺失留给翻译时按需准备（包内解包或下载）
+    // 1) 助手 exe：已缓存且版本匹配就直接用；过期/缺失留给翻译时按需准备
     PLUGIN_ROOT_URI = rootURI;
+    PLUGIN_VERSION = version || "";
     try {
         const ready = await helperExeReady();
-        if (ready) {
+        if (ready && await helperStampMatches()) {
             CONFIG.helperExe = ready;
+        } else if (ready) {
+            log("缓存的助手 exe 属于旧版本，翻译时会自动更新");
         }
     } catch (e) {
         log("检查助手 exe 失败: " + e);

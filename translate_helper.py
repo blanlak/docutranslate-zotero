@@ -20,12 +20,67 @@ import httpx
 # 其次自动探测常见安装位置，最后才报错提示用户去设置里填写。
 SERVICE = "http://127.0.0.1:8010"
 PARTIAL_INFO = None  # 部分未翻译检测结果
+T_START = 0.0        # 本次翻译起始时间
+TIMELINE = []        # 阶段耗时记录
+
+
+def mark(name):
+    """记录阶段时间点，写入 work/timing.txt，便于定位瓶颈"""
+    global TIMELINE
+    try:
+        TIMELINE.append((name, round(time.time() - T_START, 1)))
+        if work:
+            (work / "timing.txt").write_text(
+                "\n".join("%s: %.1fs" % (n, t) for n, t in TIMELINE),
+                encoding="utf-8")
+    except Exception:
+        pass
 SERVICE_EXE = ""   # 由 config.json 的 service_exe 提供，或自动探测
 SERVICE_CWD = ""   # 由 config.json 的 service_cwd 提供
-EDGE_CANDIDATES = [
-    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-]
+def _chromium_candidates():
+    """Chromium 内核浏览器候选路径（都能用 --headless 打印 PDF）"""
+    pf = os.environ.get("ProgramFiles") or r"C:\Program Files"
+    pf86 = os.environ.get("ProgramFiles(x86)") or r"C:\Program Files (x86)"
+    local = os.environ.get("LOCALAPPDATA") or ""
+    out = []
+
+    def add(base, rel):
+        if base:
+            out.append(os.path.join(base, rel))
+
+    # Edge
+    add(pf86, r"Microsoft\Edge\Application\msedge.exe")
+    add(pf, r"Microsoft\Edge\Application\msedge.exe")
+    add(local, r"Microsoft\Edge\Application\msedge.exe")
+    # Chrome
+    add(pf, r"Google\Chrome\Application\chrome.exe")
+    add(pf86, r"Google\Chrome\Application\chrome.exe")
+    add(local, r"Google\Chrome\Application\chrome.exe")
+    # Brave
+    add(pf, r"BraveSoftware\Brave-Browser\Application\brave.exe")
+    add(pf86, r"BraveSoftware\Brave-Browser\Application\brave.exe")
+    add(local, r"BraveSoftware\Brave-Browser\Application\brave.exe")
+    # Vivaldi
+    add(local, r"Vivaldi\Application\vivaldi.exe")
+    add(pf, r"Vivaldi\Application\vivaldi.exe")
+    # Opera
+    add(local, r"Programs\Opera\opera.exe")
+    add(pf, r"Opera\opera.exe")
+    add(pf86, r"Opera\opera.exe")
+    # Chromium
+    add(local, r"Chromium\Application\chrome.exe")
+    add(pf, r"Chromium\Application\chrome.exe")
+    # 国内常见 Chromium 内核
+    add(pf86, r"360\360se6\Application\360se.exe")
+    add(pf86, r"360Chrome\Chrome\Application\360chrome.exe")
+    add(local, r"360Chrome\Chrome\Application\360chrome.exe")
+    add(pf, r"Tencent\QQBrowser\QQBrowser.exe")
+    add(pf86, r"Tencent\QQBrowser\QQBrowser.exe")
+    add(pf, r"SogouExplorer\SogouExplorer.exe")
+    return out
+
+
+EDGE_CANDIDATES = _chromium_candidates()
 
 
 def _probe_service_exe():
@@ -305,6 +360,10 @@ def _detect_partial_translation(html_text):
 
 
 def translate(pdf, dest_pdf=None):
+    global T_START, TIMELINE
+    T_START = time.time()
+    TIMELINE = []
+    mark("开始")
     setp(10, "上传 PDF")
     resp = None
     for attempt in range(8):
@@ -327,12 +386,26 @@ def translate(pdf, dest_pdf=None):
     except Exception:
         pass
 
+    mark("上传完成，开始解析/翻译")
     setp(12, "解析与翻译中")
     last = ""
     fail_count = 0
     while True:
         try:
-            st = client.get(SERVICE + "/service/status/" + task_id).json()
+            resp = client.get(SERVICE + "/service/status/" + task_id)
+            # 404 = 任务在服务端已不存在（最常见于服务重启后）
+            # 必须立刻退出，否则会每秒空轮询并刷屏服务日志
+            if resp.status_code == 404:
+                setp(-1, "翻译任务已失效（翻译服务可能重启过），请重新右键翻译")
+                return False
+            if resp.status_code != 200:
+                fail_count += 1
+                if fail_count > 20:
+                    setp(-1, "服务端返回异常（HTTP " + str(resp.status_code) + "）")
+                    return False
+                time.sleep(2)
+                continue
+            st = resp.json()
             fail_count = 0
         except httpx.TransportError:
             fail_count += 1
@@ -344,6 +417,7 @@ def translate(pdf, dest_pdf=None):
         msg = st.get("status_message", "")
         if msg != last:
             last = msg
+            mark("服务端: " + msg)
             pct = st.get("progress_percent") or 0
             setp(max(15, min(90, int(pct))), msg)
         if st.get("error_flag"):
@@ -353,6 +427,7 @@ def translate(pdf, dest_pdf=None):
             break
         time.sleep(2)
 
+    mark("翻译完成，开始下载译文")
     setp(95, "下载译文")
     # 必须校验状态码：服务端出错时返回的是 JSON 错误体（如"任务不支持下载 html
     # 类型的文件，或文件已丢失"），若当成正文保存，最终会生成一份只含 JSON 的 PDF
@@ -380,6 +455,7 @@ def translate(pdf, dest_pdf=None):
         return False
     html_path = work / "translated.html"
     html_path.write_text(html, encoding="utf-8")
+    mark("译文已下载")
 
     # 部分段落未翻译检测（旧版 DocuTranslate 分片失败会静默回填原文）
     global PARTIAL_INFO
@@ -506,16 +582,23 @@ def main():
             bu = bu[: -len(suffix)].rstrip("/")
     PAYLOAD["base_url"] = bu
 
-    # 2) 并发与限速：商汤 Token Plan 的 RPM/TPM 额度很紧，并发 >2 必撞 429；
-    #    用内置 rpm 限速器把请求摊开（15 片约 3.5 分钟）。
+    # 2) 并发：由设置决定，不再额外限速。
+    #    早期为适配额度紧张的厂商写死过 rpm=4（每分钟仅 4 个请求），
+    #    会让 15 个分片硬排 3-4 分钟 —— 那是插件比网页端慢的主因。
+    #    现在只有调用方显式给了 rpm 才生效，否则交给平台侧限流 + 重试。
     try:
-        PAYLOAD["concurrent"] = max(1, min(int(PAYLOAD.get("concurrent", 2)), 3))
+        PAYLOAD["concurrent"] = max(1, min(int(PAYLOAD.get("concurrent", 8)), 32))
     except (TypeError, ValueError):
-        PAYLOAD["concurrent"] = 2
+        PAYLOAD["concurrent"] = 8
+    rpm_cfg = PAYLOAD.get("rpm")
     try:
-        PAYLOAD["rpm"] = max(1, min(int(PAYLOAD.get("rpm") or 4), 4))
+        rpm_val = int(rpm_cfg) if rpm_cfg not in (None, "") else 0
     except (TypeError, ValueError):
-        PAYLOAD["rpm"] = 4
+        rpm_val = 0
+    if rpm_val > 0:
+        PAYLOAD["rpm"] = rpm_val
+    else:
+        PAYLOAD.pop("rpm", None)
 
     # 3) 输出上限：轻量模型偶发陷入重复生成，流式响应会涨到几百 KB 仍不结束，
     #    表现为进度卡在 (n-1)/n 不动。限制 max_tokens 可强制收束。

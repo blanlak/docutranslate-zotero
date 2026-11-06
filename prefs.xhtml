@@ -15,6 +15,8 @@
                       font: inherit; background: #fff; color: #1a1a1a; }
     .dt-field input[type="number"] { max-width: 12em; }
     .dt-note { color: #999; font-size: 0.85em; margin-top: 0.25em; }
+    .dt-field select { width: 100%; padding: 0.4em 0.5em; font-size: 1em;
+        border: 1px solid #d0d0d0; border-radius: 4px; background: #fff; color: inherit; }
     .dt-btn { padding: 0.4em 1.1em; border: 1px solid #b9b9b9; border-radius: 4px;
               background: #f5f5f5; color: #1a1a1a; font: inherit; cursor: pointer; }
     .dt-btn:hover { background: #ececec; }
@@ -35,9 +37,9 @@
 
     <div class="dt-section">
       <h2>运行环境</h2>
-      <p>插件已内置翻译助手（无需 Python）。只需指向本机 DocuTranslate 本体；留空会尝试自动探测。</p>
       <div class="dt-row" style="margin-top: 0;">
         <button id="dt-probe" type="button" class="dt-btn">自动探测本机环境</button>
+        <button id="dt-download" type="button" class="dt-btn">下载 DocuTranslate</button>
         <span id="dt-probe-result" class="dt-result"></span>
       </div>
       <div class="dt-field">
@@ -47,21 +49,22 @@
       <div class="dt-field">
         <label for="dt-serviceCwd">DocuTranslate 工作目录</label>
         <input id="dt-serviceCwd" placeholder="可选，例如 D:\docutranslate"/>
-        <div class="dt-note">服务未运行时，插件会用上面的程序路径自动启动它。</div>
       </div>
       <div class="dt-field">
-        <label for="dt-edgePath">浏览器路径（用于把译文打印成 PDF，Edge/Chrome 均可）</label>
+        <label for="dt-edgePath">浏览器路径</label>
         <input id="dt-edgePath" placeholder="留空自动探测 Edge 或 Chrome"/>
       </div>
     </div>
 
     <div class="dt-section">
       <h2>翻译服务</h2>
-      <p>右键文献条目即可翻译；修改后自动保存。</p>
       <div class="dt-field">
         <label for="dt-apiKey">API Key</label>
         <input id="dt-apiKey" type="password" autocomplete="off"/>
-        <button id="dt-link-sensenova" type="button" class="dt-link">没有 Key？前往 SenseNova 平台注册获取 ↗</button>
+      </div>
+      <div class="dt-field">
+        <label for="dt-platform">接口平台</label>
+        <select id="dt-platform"></select>
       </div>
       <div class="dt-field">
         <label for="dt-baseUrl">API 地址</label>
@@ -84,21 +87,18 @@
 
     <div class="dt-section">
       <h2>PDF 解析（MinerU）</h2>
-      <p>解析 PDF 时的 MinerU 服务凭据与并发参数。</p>
       <div class="dt-field">
-        <label for="dt-mineruToken">MinerU Token</label>
+        <label for="dt-mineruToken">MinerU API Key</label>
         <input id="dt-mineruToken" type="password" autocomplete="off"/>
-        <button id="dt-link-mineru" type="button" class="dt-link">没有 Token？前往 MinerU 注册获取 ↗</button>
+        <button id="dt-link-mineru" type="button" class="dt-link">没有 Key？前往 MinerU 注册获取 ↗</button>
       </div>
       <div class="dt-field">
         <label for="dt-chunkSize">分块大小</label>
         <input id="dt-chunkSize" type="number"/>
-        <div class="dt-note">建议 3000。调小可减少单次请求长度、降低分片失败（漏译）概率，代价是分片变多。</div>
       </div>
       <div class="dt-field">
         <label for="dt-concurrent">并发数</label>
-        <input id="dt-concurrent" type="number" min="1" max="3" step="1"/>
-        <div class="dt-note">建议 1。并发越高越容易触发限流（60 RPM / 128K TPM，每模型 1500 次 / 5 小时）；漏译多时先降并发再加分块。</div>
+        <input id="dt-concurrent" type="number" min="1" max="32" step="1"/>
       </div>
     </div>
 
