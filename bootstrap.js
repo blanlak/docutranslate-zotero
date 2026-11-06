@@ -80,11 +80,11 @@ async function ensureHelperExe(onStatus) {
     const stale = p;   // 旧版缓存，刷新失败时兜底
     const exePath = RUNTIME_DIR + "\\" + HELPER_EXE_NAME;
 
-    // 包内 base64（兼容旧包；分块解码，避免单次 atob 超长字符串失败）
+    // 包内 base64（分块解码，避免单次 atob 超长字符串失败）
     try {
         const b64 = Zotero.File.getContentsFromURL(PLUGIN_ROOT_URI + "helper_b64.txt");
         if (b64 && b64.length > 1000000) {
-            if (onStatus) onStatus("正在准备翻译助手（首次约需几秒）…");
+            if (onStatus) onStatus("正在解包翻译助手（约 21 MB，仅首次）…");
             const clean = b64.replace(/\s+/g, "");
             const out = new Uint8Array(Math.floor(clean.length * 3 / 4) + 3);
             let offset = 0;
