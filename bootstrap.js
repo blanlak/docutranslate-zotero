@@ -41,8 +41,14 @@ var PLUGIN_VERSION = "";   // 由 startup 传入，用于判断缓存助手是�
 var HELPER_EXE_NAME = "dt_helper.exe";
 var HELPER_STAMP_NAME = "dt_helper.ver";   // 记录缓存 exe 对应的插件版本
 var HELPER_MIN_SIZE = 15 * 1024 * 1024;
+
 var HELPER_DOWNLOAD_URL =
     "https://github.com/blanlak/docutranslate-zotero/releases/latest/download/dt_helper.exe";
+
+// 公式渲染资源（KaTeX + pico）：随插件下发并解包到本地，打印时不再访问 CDN
+var KATEX_DIR = "";
+var KATEX_DIR_NAME = "katex";
+var KATEX_STAMP_NAME = ".ver";
 
 async function helperExeReady() {
     try {
@@ -137,6 +143,51 @@ async function ensureHelperExe(onStatus) {
         return stale;
     }
     return "";
+}
+
+// base64 -> 字节数组（分块解码，避免超长字符串一次性 atob）
+function b64ToBytes(b64) {
+    const clean = String(b64 || "").replace(/[^A-Za-z0-9+/=]/g, "");
+    const out = new Uint8Array(Math.floor(clean.length * 3 / 4) + 3);
+    let off = 0;
+    const CHUNK = 4 * 1024 * 1024;
+    for (let i = 0; i < clean.length; i += CHUNK) {
+        const bin = atob(clean.slice(i, i + CHUNK));
+        for (let j = 0; j < bin.length; j++) out[off++] = bin.charCodeAt(j);
+    }
+    return out.subarray(0, off);
+}
+
+// 解包公式渲染资源（KaTeX + pico）到配置目录，按插件版本校验
+// 目的：打印 PDF 时不依赖 CDN。CDN 抖动过一次，公式会以 LaTeX 源码印出来。
+async function ensureKatex() {
+    const dir = RUNTIME_DIR + "\\" + KATEX_DIR_NAME;
+    try {
+        if (PLUGIN_VERSION) {
+            const v = await IOUtils.readUTF8(dir + "\\" + KATEX_STAMP_NAME);
+            if (String(v).trim() === PLUGIN_VERSION) { KATEX_DIR = dir; return dir; }
+        }
+    } catch (e) {}
+
+    try {
+        const raw = Zotero.File.getContentsFromURL(PLUGIN_ROOT_URI + "katex_pack.json");
+        const pack = JSON.parse(raw);
+        const files = (pack && pack.files) || {};
+        Zotero.File.createDirectoryIfMissing(dir);
+        Zotero.File.createDirectoryIfMissing(dir + "\\fonts");
+        Zotero.File.createDirectoryIfMissing(dir + "\\contrib");
+        let n = 0;
+        for (const rel of Object.keys(files)) {
+            await IOUtils.write(dir + "\\" + rel.replace(/\//g, "\\"), b64ToBytes(files[rel]));
+            n++;
+        }
+        await IOUtils.writeUTF8(dir + "\\" + KATEX_STAMP_NAME, PLUGIN_VERSION || "0");
+        KATEX_DIR = dir;
+        log("公式渲染资源已解包: " + n + " 个文件");
+    } catch (e) {
+        log("公式渲染资源解包失败: " + e);
+    }
+    return KATEX_DIR;
 }
 
 function prefGet(name, fallback) {
@@ -609,7 +660,8 @@ var Translator = {
                 // 运行环境（每次翻译时重新读取，改设置后立即生效）
                 service_exe: prefGet("serviceExe") || CONFIG.serviceExe,
                 service_cwd: prefGet("serviceCwd") || CONFIG.serviceCwd,
-                edge_path: prefGet("edgePath")
+                edge_path: prefGet("edgePath"),
+                katex_dir: KATEX_DIR
             };
             await writeUTF8(workDir + "\\config.json", JSON.stringify(cfg));
             log("配置: model=" + cfg.model_id + " base=" + cfg.base_url +
@@ -922,6 +974,13 @@ async function ensureRuntime(rootURI, version) {
         } catch (e) {
             log("解包助手脚本失败: " + e);
         }
+    }
+
+    // 1.5) 公式渲染资源：解包一次，之后打印不再依赖 CDN
+    try {
+        await ensureKatex();
+    } catch (e) {
+        log("准备公式资源失败: " + e);
     }
 
     // 2) 路径：设置面板 > 自动探测（只保留 DocuTranslate 本体与可选的 Edge）

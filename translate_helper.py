@@ -9,6 +9,7 @@
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -22,6 +23,35 @@ SERVICE = "http://127.0.0.1:8010"
 PARTIAL_INFO = None  # 部分未翻译检测结果
 T_START = 0.0        # 本次翻译起始时间
 TIMELINE = []        # 阶段耗时记录
+KATEX_DIR = ""       # 插件解包的本地公式渲染资源（离线，避免打印时依赖 CDN）
+
+# HTML 里引用的外部静态资源 -> 本地文件名
+_REMOTE_ASSETS = (
+    ("https://s4.zstatic.net/ajax/libs/KaTeX/0.16.9/", "{dir}/"),
+    ("https://s4.zstatic.net/ajax/libs/picocss/2.1.1/pico.min.css", "{dir}/pico.min.css"),
+)
+
+
+def _localize_assets(html, katex_dir):
+    """把公式/样式引用换成本地文件。
+
+    KaTeX 与 pico 都从 CDN 拉取，网络抖动时脚本不执行，
+    公式会以 LaTeX 源码的形式被当正文印出来（实测过一次）。
+    资源随插件下发后，打印不再需要联网。
+    """
+    if not katex_dir or not pathlib.Path(katex_dir).is_dir():
+        return html
+    # 路径可能包含空格或中文（用户名），必须转成合法的 file:// URL
+    from urllib.parse import quote
+    posix = str(pathlib.Path(katex_dir)).replace("\\", "/").lstrip("/")
+    base = "file:///" + quote(posix, safe="/:")
+    for remote, local in _REMOTE_ASSETS:
+        html = html.replace(remote, local.format(dir=base))
+    # copy-tex 的样式在 CDN 上并不存在，去掉这条无效引用
+    html = re.sub(r'<link[^>]*copy-tex[^>]*>', '', html)
+    # mermaid 只在流程图文档里用到，PDF 转出的内容用不上，2.6MB 的脚本没必要加载
+    html = re.sub(r'<script[^>]*mermaid[^>]*>\s*</script>', '', html)
+    return html
 
 
 def mark(name):
@@ -453,6 +483,8 @@ def translate(pdf, dest_pdf=None):
     if stripped.startswith("{") and "detail" in stripped[:300]:
         setp(-1, "服务端返回错误：" + stripped[:200])
         return False
+    # 公式/样式改用本地资源，避免打印时 CDN 加载失败导致公式变成 LaTeX 源码
+    html = _localize_assets(html, KATEX_DIR)
     html_path = work / "translated.html"
     html_path.write_text(html, encoding="utf-8")
     mark("译文已下载")
@@ -572,6 +604,10 @@ def main():
     edge_cfg = str(cfg.get("edge_path") or "").strip()
     if edge_cfg:
         EDGE_CANDIDATES = [edge_cfg]
+
+    # 公式渲染资源：插件已解包到本地，打印时不再访问 CDN
+    global KATEX_DIR
+    KATEX_DIR = str(cfg.get("katex_dir") or "").strip()
 
     # === 配置规范化（防止面板填错导致 404 / 429）===
     # 1) 该字段是 base_url，DocuTranslate 内部会自行拼接 "/chat/completions"。
