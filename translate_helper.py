@@ -389,12 +389,22 @@ def _detect_partial_translation(html_text):
     return None
 
 
-def translate(pdf, dest_pdf=None):
-    global T_START, TIMELINE
-    T_START = time.time()
-    TIMELINE = []
-    mark("开始")
-    setp(10, "上传 PDF")
+def _is_transient(msg):
+    """判断失败原因是否为上游的瞬时拒绝，值得整单重试一次。
+
+    只认 MinerU 相关的 403/429/5xx 与超时：实测解析其实已经完成，
+    只是取结果那一步被网关拒绝，重提一次通常就能过。
+    """
+    m = str(msg or "").lower()
+    if "mineru" not in m:
+        return False
+    return any(k in m for k in
+               ("403", "429", "500", "502", "503", "504",
+                "timed out", "timeout", "connection reset", "remotedisconnected"))
+
+
+def _submit_task(pdf):
+    """上传 PDF 并返回 task_id，失败返回空串。"""
     resp = None
     for attempt in range(8):
         try:
@@ -407,17 +417,19 @@ def translate(pdf, dest_pdf=None):
         except httpx.TransportError as e:
             if attempt == 7:
                 setp(-1, "上传失败: {}".format(e))
-                return False
+                return ""
             time.sleep(3)
     resp.raise_for_status()
-    task_id = resp.json()["task_id"]
+    task_id = resp.json().get("task_id", "")
     try:
         (work / "service_task_id.txt").write_text(str(task_id), encoding="utf-8")
     except Exception:
         pass
+    return task_id
 
-    mark("上传完成，开始解析/翻译")
-    setp(12, "解析与翻译中")
+
+def _wait_task(task_id):
+    """轮询任务直到结束，返回 (是否成功, 失败原因)。"""
     last = ""
     fail_count = 0
     while True:
@@ -426,13 +438,11 @@ def translate(pdf, dest_pdf=None):
             # 404 = 任务在服务端已不存在（最常见于服务重启后）
             # 必须立刻退出，否则会每秒空轮询并刷屏服务日志
             if resp.status_code == 404:
-                setp(-1, "翻译任务已失效（翻译服务可能重启过），请重新右键翻译")
-                return False
+                return False, "翻译任务已失效（翻译服务可能重启过），请重新右键翻译"
             if resp.status_code != 200:
                 fail_count += 1
                 if fail_count > 20:
-                    setp(-1, "服务端返回异常（HTTP " + str(resp.status_code) + "）")
-                    return False
+                    return False, "服务端返回异常（HTTP " + str(resp.status_code) + "）"
                 time.sleep(2)
                 continue
             st = resp.json()
@@ -440,8 +450,7 @@ def translate(pdf, dest_pdf=None):
         except httpx.TransportError:
             fail_count += 1
             if fail_count > 20:
-                setp(-1, "与服务端的连接持续中断")
-                return False
+                return False, "与服务端的连接持续中断"
             time.sleep(2)
             continue
         msg = st.get("status_message", "")
@@ -451,11 +460,38 @@ def translate(pdf, dest_pdf=None):
             pct = st.get("progress_percent") or 0
             setp(max(15, min(90, int(pct))), msg)
         if st.get("error_flag"):
-            setp(-1, "翻译失败: " + msg)
-            return False
+            return False, msg
         if not st.get("is_processing") and st.get("download_ready"):
-            break
+            return True, ""
         time.sleep(2)
+
+
+def translate(pdf, dest_pdf=None):
+    global T_START, TIMELINE
+    T_START = time.time()
+    TIMELINE = []
+    mark("开始")
+    setp(10, "上传 PDF")
+
+    # 整单最多跑两次：MinerU 偶尔在取结果时回 403（解析其实已完成），
+    # 重提一次即可，但只对这类瞬时错误重试，避免无谓消耗额度。
+    task_id = ""
+    for round_no in range(2):
+        task_id = _submit_task(pdf)
+        if not task_id:
+            return False
+        mark("上传完成，开始解析/翻译")
+        setp(12, "解析与翻译中" if round_no == 0 else "解析服务偶发拒绝，重试中")
+        ok, err = _wait_task(task_id)
+        if ok:
+            break
+        if round_no == 0 and _is_transient(err):
+            mark("上游瞬时错误，准备重试: " + str(err)[:80])
+            setp(12, "解析服务偶发拒绝，正在重试…")
+            time.sleep(3)
+            continue
+        setp(-1, "翻译失败: " + (err or "服务端未给出原因"))
+        return False
 
     mark("翻译完成，开始下载译文")
     setp(95, "下载译文")

@@ -40,7 +40,7 @@ var PLUGIN_VERSION = "";   // 由 startup 传入，用于判断缓存助手是�
 // 内置助手：优先用已缓存的，缺失或版本过期时从 Release 下载（20MB 左右）
 var HELPER_EXE_NAME = "dt_helper.exe";
 var HELPER_STAMP_NAME = "dt_helper.ver";   // 记录缓存 exe 对应的插件版本
-var HELPER_MIN_SIZE = 15 * 1024 * 1024;
+var HELPER_MIN_SIZE = 6 * 1024 * 1024;   // 实际约 14 MB，低于此值视为没解包成功/下载不完整
 
 var HELPER_DOWNLOAD_URL =
     "https://github.com/blanlak/docutranslate-zotero/releases/latest/download/dt_helper.exe";
